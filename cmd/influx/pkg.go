@@ -51,6 +51,7 @@ type cmdPkgBuilder struct {
 	org                 organization
 	quiet               bool
 	recurse             bool
+	stackID             string
 	urls                []string
 
 	applyOpts struct {
@@ -101,6 +102,7 @@ func (b *cmdPkgBuilder) cmdPkgApply() *cobra.Command {
 	b.registerPkgPrintOpts(cmd)
 	cmd.Flags().BoolVarP(&b.quiet, "quiet", "q", false, "Disable output printing")
 	cmd.Flags().StringVar(&b.applyOpts.force, "force", "", `TTY input, if package will have destructive changes, proceed if set "true"`)
+	cmd.Flags().StringVar(&b.stackID, "stack-id", "", "Stack ID to associate pkg application")
 
 	b.applyOpts.secrets = []string{}
 	cmd.Flags().StringSliceVar(&b.applyOpts.secrets, "secret", nil, "Secrets to provide alongside the package; format should --secret=SECRET_KEY=SECRET_VALUE --secret=SECRET_KEY_2=SECRET_VALUE_2")
@@ -138,7 +140,19 @@ func (b *cmdPkgBuilder) pkgApplyRunEFn(cmd *cobra.Command, args []string) error 
 		}
 	}
 
-	drySum, diff, err := svc.DryRun(context.Background(), influxOrgID, 0, pkg, pkger.ApplyWithEnvRefs(providedEnvRefs))
+	var stackID influxdb.ID
+	if b.stackID != "" {
+		if err := stackID.DecodeFromString(b.stackID); err != nil {
+			return err
+		}
+	}
+
+	opts := []pkger.ApplyOptFn{
+		pkger.ApplyWithEnvRefs(providedEnvRefs),
+		pkger.ApplyWithStackID(stackID),
+	}
+
+	drySum, diff, err := svc.DryRun(context.Background(), influxOrgID, 0, pkg, opts...)
 	if err != nil {
 		return err
 	}
@@ -172,7 +186,9 @@ func (b *cmdPkgBuilder) pkgApplyRunEFn(cmd *cobra.Command, args []string) error 
 		return errors.New("package has conflicts with existing resources and cannot safely apply")
 	}
 
-	summary, err := svc.Apply(context.Background(), influxOrgID, 0, pkg, pkger.ApplyWithEnvRefs(providedEnvRefs), pkger.ApplyWithSecrets(providedSecrets))
+	opts = append(opts, pkger.ApplyWithSecrets(providedSecrets))
+
+	summary, err := svc.Apply(context.Background(), influxOrgID, 0, pkg, opts...)
 	if err != nil {
 		return err
 	}
@@ -1194,6 +1210,7 @@ func colorRow(color tablewriter.Colors, i int) []tablewriter.Colors {
 	}
 	return colors
 }
+
 func tablePrinter(wr io.Writer, table string, headers []string, count int, hasColor, hasTableBorders bool, rowFn func(i int) []string) {
 	color.New(color.FgYellow, color.Bold).Fprintln(wr, strings.ToUpper(table))
 

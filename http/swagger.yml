@@ -7209,6 +7209,8 @@ components:
           type: boolean
         orgID:
           type: string
+        stackID:
+          type: string
         package:
           $ref: "#/components/schemas/Pkg"
         packages:
