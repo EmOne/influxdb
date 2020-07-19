@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/bolt"
-	"github.com/influxdata/influxdb/http"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/bolt"
+	"github.com/influxdata/influxdb/v2/http"
 	"github.com/spf13/cobra"
 	"go.uber.org/multierr"
 )
@@ -22,6 +22,8 @@ Downloaded files are written to the directory indicated by --path.
 The target directory, and any parent directories, are created automatically.
 Data file have extension .tsm; meta data is written to %s in the same directory.`,
 		bolt.DefaultFilename)
+
+	f.registerFlags(cmd)
 
 	opts := flagOpts{
 		{
@@ -51,10 +53,6 @@ func newBackupService() (influxdb.BackupService, error) {
 
 func backupF(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-
-	if flags.local {
-		return fmt.Errorf("local flag not supported for backup command")
-	}
 
 	if backupFlags.Path == "" {
 		return fmt.Errorf("must specify path")

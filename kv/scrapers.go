@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 )
 
 var (
@@ -80,11 +80,6 @@ var (
 )
 
 var _ influxdb.ScraperTargetStoreService = (*Service)(nil)
-
-func (s *Service) initializeScraperTargets(ctx context.Context, tx Tx) error {
-	_, err := s.scrapersBucket(tx)
-	return err
-}
 
 func (s *Service) scrapersBucket(tx Tx) (Bucket, error) {
 	b, err := tx.Bucket([]byte(scrapersBucket))

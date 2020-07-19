@@ -3,17 +3,23 @@ package tenant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
 )
 
-var (
-	urmBucket            = []byte("userresourcemappingsv1")
-	urmByUserIndexBucket = []byte("userresourcemappingsbyuserindexv1")
-)
+var urmBucket = []byte("userresourcemappingsv1")
 
+// NOTE(affo): On URM creation, we check that the user exists.
+// We do not check that the resource it is pointing to exists.
+// This decision takes into account that different resources could not be in the same store.
+// To perform that kind of check, we must rely on the service layer.
+// However, we do not want having the storage layer depend on the service layer above.
 func (s *Store) CreateURM(ctx context.Context, tx kv.Tx, urm *influxdb.UserResourceMapping) error {
+	if _, err := s.GetUser(ctx, tx, urm.UserID); err != nil {
+		return err
+	}
 	if err := s.uniqueUserResourceMapping(ctx, tx, urm); err != nil {
 		return err
 	}
@@ -65,20 +71,34 @@ func (s *Store) ListURMs(ctx context.Context, tx kv.Tx, filter influxdb.UserReso
 	}
 
 	if filter.UserID.Valid() {
-		// urm by user index lookup
-		userID, _ := filter.UserID.Encode()
+		var (
+			errPageLimit = errors.New("page limit reached")
+			// urm by user index lookup
+			userID, _ = filter.UserID.Encode()
+			seen      int
+		)
+
 		if err := s.urmByUserIndex.Walk(ctx, tx, userID, func(k, v []byte) error {
 			m := &influxdb.UserResourceMapping{}
 			if err := json.Unmarshal(v, m); err != nil {
 				return CorruptURMError(err)
 			}
 
-			if filterFn(m) {
+			// respect offset parameter
+			reachedOffset := (len(opt) == 0 || seen >= opt[0].Offset)
+			if filterFn(m) && reachedOffset {
 				ms = append(ms, m)
 			}
 
+			// respect pagination in URMs
+			if len(opt) > 0 && opt[0].Limit > 0 && len(ms) >= opt[0].Limit {
+				return errPageLimit
+			}
+
+			seen++
+
 			return nil
-		}); err != nil {
+		}); err != nil && err != errPageLimit {
 			return nil, err
 		}
 
@@ -114,7 +134,7 @@ func (s *Store) ListURMs(ctx context.Context, tx kv.Tx, filter influxdb.UserReso
 			ms = append(ms, m)
 		}
 
-		if len(opt) > 0 && len(ms) >= opt[0].Limit {
+		if len(opt) > 0 && opt[0].Limit > 0 && len(ms) >= opt[0].Limit {
 			break
 		}
 	}

@@ -4,10 +4,12 @@ import {Config, Table} from '@influxdata/giraffe'
 
 // Components
 import EmptyGraphMessage from 'src/shared/components/EmptyGraphMessage'
-import GraphLoadingDots from 'src/shared/components/GraphLoadingDots'
 
 // Utils
-import {useVisDomainSettings} from 'src/shared/utils/useVisDomainSettings'
+import {
+  useVisXDomainSettings,
+  useVisYDomainSettings,
+} from 'src/shared/utils/useVisDomainSettings'
 import {getFormatter} from 'src/shared/utils/vis'
 
 // Constants
@@ -16,16 +18,9 @@ import {DEFAULT_LINE_COLORS} from 'src/shared/constants/graphColorPalettes'
 import {INVALID_DATA_COPY} from 'src/shared/copy/cell'
 
 // Types
-import {
-  RemoteDataState,
-  HeatmapViewProperties,
-  TimeZone,
-  TimeRange,
-  Theme,
-} from 'src/types'
+import {HeatmapViewProperties, TimeZone, TimeRange, Theme} from 'src/types'
 
 interface Props {
-  loading: RemoteDataState
   timeRange: TimeRange | null
   table: Table
   timeZone: TimeZone
@@ -35,7 +30,6 @@ interface Props {
 }
 
 const HeatmapPlot: FunctionComponent<Props> = ({
-  loading,
   timeRange,
   table,
   timeZone,
@@ -59,13 +53,13 @@ const HeatmapPlot: FunctionComponent<Props> = ({
 }) => {
   const columnKeys = table.columnKeys
 
-  const [xDomain, onSetXDomain, onResetXDomain] = useVisDomainSettings(
+  const [xDomain, onSetXDomain, onResetXDomain] = useVisXDomainSettings(
     storedXDomain,
     table.getColumn(xColumn, 'number'),
     timeRange
   )
 
-  const [yDomain, onSetYDomain, onResetYDomain] = useVisDomainSettings(
+  const [yDomain, onSetYDomain, onResetYDomain] = useVisYDomainSettings(
     storedYDomain,
     table.getColumn(yColumn, 'number')
   )
@@ -127,12 +121,7 @@ const HeatmapPlot: FunctionComponent<Props> = ({
     ],
   }
 
-  return (
-    <>
-      {loading === RemoteDataState.Loading && <GraphLoadingDots />}
-      {children(config)}
-    </>
-  )
+  return children(config)
 }
 
 export default HeatmapPlot

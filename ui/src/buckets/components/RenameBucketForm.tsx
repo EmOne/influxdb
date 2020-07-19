@@ -1,7 +1,7 @@
 // Libraries
 import React, {PureComponent, ChangeEvent} from 'react'
-import {withRouter, WithRouterProps} from 'react-router'
-import {connect} from 'react-redux'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import {ComponentStatus} from 'src/clockface'
@@ -21,27 +21,18 @@ import {
 import {renameBucket} from 'src/buckets/actions/thunks'
 
 // Types
-import {AppState, Bucket, ResourceType} from 'src/types'
+import {AppState, Bucket, ResourceType, OwnBucket} from 'src/types'
 
 // Selectors
 import {getAll, getByID} from 'src/resources/selectors'
 
 interface State {
-  bucket: Bucket
+  bucket: OwnBucket
 }
 
-interface StateProps {
-  startBucket: Bucket
-  buckets: Bucket[]
-}
-
-interface DispatchProps {
-  onRenameBucket: typeof renameBucket
-}
-
-type OwnProps = {}
-
-type Props = StateProps & DispatchProps & WithRouterProps & OwnProps
+type ReduxProps = ConnectedProps<typeof connector>
+type RouterProps = RouteComponentProps<{bucketID: string; orgID: string}>
+type Props = ReduxProps & RouterProps
 
 class RenameBucketForm extends PureComponent<Props, State> {
   public state = {bucket: this.props.startBucket}
@@ -135,21 +126,16 @@ class RenameBucketForm extends PureComponent<Props, State> {
   }
 
   private handleClose = () => {
-    const {
-      router,
-      params: {orgID},
-    } = this.props
+    const {history, match} = this.props
 
-    router.push(`/orgs/${orgID}/load-data/buckets`)
+    history.push(`/orgs/${match.params.orgID}/load-data/buckets`)
   }
 }
 
-const mstp = (state: AppState, props: Props): StateProps => {
-  const {
-    params: {bucketID},
-  } = props
+const mstp = (state: AppState, props: RouterProps) => {
+  const {bucketID} = props.match.params
 
-  const startBucket = getByID<Bucket>(state, ResourceType.Buckets, bucketID)
+  const startBucket = getByID<OwnBucket>(state, ResourceType.Buckets, bucketID)
   const buckets = getAll<Bucket>(state, ResourceType.Buckets).filter(
     b => b.id !== bucketID
   )
@@ -160,14 +146,11 @@ const mstp = (state: AppState, props: Props): StateProps => {
   }
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onRenameBucket: renameBucket,
 }
 
+const connector = connect(mstp, mdtp)
+
 // state mapping requires router
-export default withRouter<OwnProps>(
-  connect<StateProps, DispatchProps, OwnProps>(
-    mstp,
-    mdtp
-  )(RenameBucketForm)
-)
+export default withRouter(connector(RenameBucketForm))

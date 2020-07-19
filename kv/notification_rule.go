@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/influxdata/influxdb/notification/rule"
+	"github.com/influxdata/influxdb/v2/notification/rule"
 	"go.uber.org/zap"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 )
 
 var (
@@ -29,13 +29,6 @@ var (
 )
 
 var _ influxdb.NotificationRuleStore = (*Service)(nil)
-
-func (s *Service) initializeNotificationRule(ctx context.Context, tx Tx) error {
-	if _, err := s.notificationRuleBucket(tx); err != nil {
-		return err
-	}
-	return nil
-}
 
 // UnavailableNotificationRuleStoreError is used if we aren't able to interact with the
 // store, it means the store is not available at the moment (e.g. network).

@@ -16,15 +16,17 @@ import (
 
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/lang"
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/bolt"
-	influxdbcontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/http"
-	"github.com/influxdata/influxdb/kv"
-	"github.com/influxdata/influxdb/mock"
-	"github.com/influxdata/influxdb/pkg/httpc"
-	"github.com/influxdata/influxdb/pkger"
-	"github.com/influxdata/influxdb/query"
+	platform "github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/bolt"
+	influxdbcontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/http"
+	"github.com/influxdata/influxdb/v2/kit/feature"
+	"github.com/influxdata/influxdb/v2/mock"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
+	"github.com/influxdata/influxdb/v2/pkger"
+	"github.com/influxdata/influxdb/v2/query"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 )
 
 // TestLauncher is a test wrapper for launcher.Launcher.
@@ -49,11 +51,12 @@ type TestLauncher struct {
 }
 
 // NewTestLauncher returns a new instance of TestLauncher.
-func NewTestLauncher() *TestLauncher {
+func NewTestLauncher(flagger feature.Flagger) *TestLauncher {
 	l := &TestLauncher{Launcher: NewLauncher()}
 	l.Launcher.Stdin = &l.Stdin
 	l.Launcher.Stdout = &l.Stdout
 	l.Launcher.Stderr = &l.Stderr
+	l.Launcher.flagger = flagger
 	if testing.Verbose() {
 		l.Launcher.Stdout = io.MultiWriter(l.Launcher.Stdout, os.Stdout)
 		l.Launcher.Stderr = io.MultiWriter(l.Launcher.Stderr, os.Stderr)
@@ -68,9 +71,9 @@ func NewTestLauncher() *TestLauncher {
 }
 
 // RunTestLauncherOrFail initializes and starts the server.
-func RunTestLauncherOrFail(tb testing.TB, ctx context.Context, args ...string) *TestLauncher {
+func RunTestLauncherOrFail(tb testing.TB, ctx context.Context, flagger feature.Flagger, args ...string) *TestLauncher {
 	tb.Helper()
-	l := NewTestLauncher()
+	l := NewTestLauncher(flagger)
 
 	if err := l.Run(ctx, args...); err != nil {
 		tb.Fatal(err)
@@ -79,12 +82,15 @@ func RunTestLauncherOrFail(tb testing.TB, ctx context.Context, args ...string) *
 }
 
 // Run executes the program with additional arguments to set paths and ports.
+// Passed arguments will overwrite/add to the default ones.
 func (tl *TestLauncher) Run(ctx context.Context, args ...string) error {
-	args = append(args, "--bolt-path", filepath.Join(tl.Path, bolt.DefaultFilename))
-	args = append(args, "--engine-path", filepath.Join(tl.Path, "engine"))
-	args = append(args, "--http-bind-address", "127.0.0.1:0")
-	args = append(args, "--log-level", "debug")
-	return tl.Launcher.Run(ctx, args...)
+	largs := make([]string, 0, len(args)+8)
+	largs = append(largs, "--bolt-path", filepath.Join(tl.Path, bolt.DefaultFilename))
+	largs = append(largs, "--engine-path", filepath.Join(tl.Path, "engine"))
+	largs = append(largs, "--http-bind-address", "127.0.0.1:0")
+	largs = append(largs, "--log-level", "debug")
+	largs = append(largs, args...)
+	return tl.Launcher.Run(ctx, largs...)
 }
 
 // Shutdown stops the program and cleans up temporary paths.
@@ -102,7 +108,7 @@ func (tl *TestLauncher) ShutdownOrFail(tb testing.TB, ctx context.Context) {
 	}
 }
 
-// SetupOrFail creates a new user, bucket, org, and auth token.
+// Setup creates a new user, bucket, org, and auth token.
 func (tl *TestLauncher) Setup() error {
 	results, err := tl.OnBoard(&platform.OnboardingRequest{
 		User:     "USER",
@@ -221,7 +227,8 @@ func (tl *TestLauncher) MustExecuteQuery(query string) *QueryResults {
 // ExecuteQuery executes the provided query against the ith query node.
 // Callers of ExecuteQuery must call Done on the returned QueryResults.
 func (tl *TestLauncher) ExecuteQuery(q string) (*QueryResults, error) {
-	ctx := influxdbcontext.SetAuthorizer(context.Background(), &mock.Authorization{})
+	ctx := influxdbcontext.SetAuthorizer(context.Background(), mock.NewMockAuthorizer(true, nil))
+	ctx, _ = feature.Annotate(ctx, tl.flagger)
 	fq, err := tl.QueryController().Query(ctx, &query.Request{
 		Authorization:  tl.Auth,
 		OrganizationID: tl.Auth.OrgID,
@@ -290,6 +297,21 @@ func (tl *TestLauncher) FluxQueryOrFail(tb testing.TB, org *platform.Organizatio
 	return string(b)
 }
 
+// QueryFlux returns the csv response from a flux query.
+// It also removes all the \r to make it easier to write tests.
+func (tl *TestLauncher) QueryFlux(tb testing.TB, org *platform.Organization, token, query string) string {
+	tb.Helper()
+
+	b, err := http.SimpleQuery(tl.URL(), query, org.Name, token)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	// remove all \r as well as the extra terminating \n
+	b = bytes.ReplaceAll(b, []byte("\r"), nil)
+	return string(b[:len(b)-1])
+}
+
 // MustNewHTTPRequest returns a new nethttp.Request with base URL and auth attached. Fail on error.
 func (tl *TestLauncher) MustNewHTTPRequest(method, rawurl, body string) *nethttp.Request {
 	req, err := nethttp.NewRequest(method, tl.URL()+rawurl, strings.NewReader(body))
@@ -333,7 +355,7 @@ func (tl *TestLauncher) FluxQueryService() *http.FluxQueryService {
 
 func (tl *TestLauncher) BucketService(tb testing.TB) *http.BucketService {
 	tb.Helper()
-	return &http.BucketService{Client: tl.HTTPClient(tb), OpPrefix: kv.OpPrefix}
+	return &http.BucketService{Client: tl.HTTPClient(tb)}
 }
 
 func (tl *TestLauncher) CheckService() platform.CheckService {
@@ -359,6 +381,10 @@ func (tl *TestLauncher) NotificationRuleService() platform.NotificationRuleStore
 	return tl.kvService
 }
 
+func (tl *TestLauncher) OrgService(tb testing.TB) platform.OrganizationService {
+	return tl.kvService
+}
+
 func (tl *TestLauncher) PkgerService(tb testing.TB) pkger.SVC {
 	return &pkger.HTTPRemoteService{Client: tl.HTTPClient(tb)}
 }
@@ -381,8 +407,8 @@ func (tl *TestLauncher) AuthorizationService(tb testing.TB) *http.AuthorizationS
 	return &http.AuthorizationService{Client: tl.HTTPClient(tb)}
 }
 
-func (tl *TestLauncher) TaskService() *http.TaskService {
-	return &http.TaskService{Addr: tl.URL(), Token: tl.Auth.Token}
+func (tl *TestLauncher) TaskService(tb testing.TB) *http.TaskService {
+	return &http.TaskService{Client: tl.HTTPClient(tb)}
 }
 
 func (tl *TestLauncher) HTTPClient(tb testing.TB) *httpc.Client {
@@ -400,6 +426,41 @@ func (tl *TestLauncher) HTTPClient(tb testing.TB) *httpc.Client {
 		tl.httpClient = client
 	}
 	return tl.httpClient
+}
+
+func (tl *TestLauncher) Metrics(tb testing.TB) (metrics map[string]*dto.MetricFamily) {
+	req := tl.HTTPClient(tb).
+		Get("/metrics").
+		RespFn(func(resp *nethttp.Response) error {
+			if resp.StatusCode != nethttp.StatusOK {
+				return fmt.Errorf("unexpected status code: %d %s", resp.StatusCode, resp.Status)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			var parser expfmt.TextParser
+			metrics, _ = parser.TextToMetricFamilies(resp.Body)
+			return nil
+		})
+	if err := req.Do(context.Background()); err != nil {
+		tb.Fatal(err)
+	}
+	return metrics
+}
+
+func (tl *TestLauncher) NumReads(tb testing.TB, op string) uint64 {
+	const metricName = "query_influxdb_source_read_request_duration_seconds"
+	mf := tl.Metrics(tb)[metricName]
+	if mf != nil {
+		fmt.Printf("%v\n", mf)
+		for _, m := range mf.Metric {
+			for _, label := range m.Label {
+				if label.GetName() == "op" && label.GetValue() == op {
+					return m.Histogram.GetSampleCount()
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // QueryResult wraps a single flux.Result with some helper methods.

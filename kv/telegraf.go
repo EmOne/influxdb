@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 )
 
 var (
@@ -73,16 +73,6 @@ var (
 )
 
 var _ influxdb.TelegrafConfigStore = (*Service)(nil)
-
-func (s *Service) initializeTelegraf(ctx context.Context, tx Tx) error {
-	if _, err := s.telegrafBucket(tx); err != nil {
-		return err
-	}
-	if _, err := s.telegrafPluginsBucket(tx); err != nil {
-		return err
-	}
-	return nil
-}
 
 func (s *Service) telegrafBucket(tx Tx) (Bucket, error) {
 	b, err := tx.Bucket(telegrafBucket)

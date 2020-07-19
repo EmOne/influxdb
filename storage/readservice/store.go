@@ -5,21 +5,37 @@ import (
 	"errors"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/storage/reads"
-	"github.com/influxdata/influxdb/storage/reads/datatypes"
-	"github.com/influxdata/influxdb/tsdb/cursors"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/models"
+	"github.com/influxdata/influxdb/v2/storage/reads"
+	"github.com/influxdata/influxdb/v2/storage/reads/datatypes"
+	"github.com/influxdata/influxdb/v2/tsdb/cursors"
 	"github.com/influxdata/influxql"
 )
 
 type store struct {
-	viewer reads.Viewer
+	viewer    reads.Viewer
+	groupCap  GroupCapability
+	windowCap WindowAggregateCapability
 }
 
 // NewStore creates a store used to query time-series data.
 func NewStore(viewer reads.Viewer) reads.Store {
-	return &store{viewer: viewer}
+	return &store{
+		viewer: viewer,
+		groupCap: GroupCapability{
+			Count: true,
+			Sum:   true,
+			First: true,
+			Last:  true,
+		},
+		windowCap: WindowAggregateCapability{
+			Count: true,
+			Sum:   true,
+			First: true,
+			Last:  true,
+		},
+	}
 }
 
 func (s *store) ReadFilter(ctx context.Context, req *datatypes.ReadFilterRequest) (reads.ResultSet, error) {
@@ -43,6 +59,10 @@ func (s *store) ReadFilter(ctx context.Context, req *datatypes.ReadFilterRequest
 	}
 
 	return reads.NewFilteredResultSet(ctx, req, cur), nil
+}
+
+func (s *store) GetGroupCapability(ctx context.Context) reads.GroupCapability {
+	return s.groupCap
 }
 
 func (s *store) ReadGroup(ctx context.Context, req *datatypes.ReadGroupRequest) (reads.GroupResultSet, error) {
@@ -153,3 +173,61 @@ func (s *store) GetSource(orgID, bucketID uint64) proto.Message {
 		OrganizationID: orgID,
 	}
 }
+
+func (s *store) GetWindowAggregateCapability(ctx context.Context) reads.WindowAggregateCapability {
+	return s.windowCap
+}
+
+// WindowAggregate will invoke a ReadWindowAggregateRequest against the Store.
+func (s *store) WindowAggregate(ctx context.Context, req *datatypes.ReadWindowAggregateRequest) (reads.ResultSet, error) {
+	span, ctx := tracing.StartSpanFromContext(ctx)
+	defer span.Finish()
+
+	if req.ReadSource == nil {
+		return nil, tracing.LogError(span, errors.New("missing read source"))
+	}
+
+	source, err := getReadSource(*req.ReadSource)
+	if err != nil {
+		return nil, tracing.LogError(span, err)
+	}
+
+	var cur reads.SeriesCursor
+	if cur, err = reads.NewIndexSeriesCursor(ctx, source.GetOrgID(), source.GetBucketID(), req.Predicate, s.viewer); err != nil {
+		return nil, tracing.LogError(span, err)
+	} else if cur == nil {
+		return nil, nil
+	}
+
+	return reads.NewWindowAggregateResultSet(ctx, req, cur)
+}
+
+type GroupCapability struct {
+	Count bool
+	Sum   bool
+	First bool
+	Last  bool
+}
+
+func (c GroupCapability) HaveCount() bool { return c.Count }
+func (c GroupCapability) HaveSum() bool   { return c.Sum }
+func (c GroupCapability) HaveFirst() bool { return c.First }
+func (c GroupCapability) HaveLast() bool  { return c.Last }
+
+type WindowAggregateCapability struct {
+	Min   bool
+	Max   bool
+	Mean  bool
+	Count bool
+	Sum   bool
+	First bool
+	Last  bool
+}
+
+func (w WindowAggregateCapability) HaveMin() bool   { return w.Min }
+func (w WindowAggregateCapability) HaveMax() bool   { return w.Max }
+func (w WindowAggregateCapability) HaveMean() bool  { return w.Mean }
+func (w WindowAggregateCapability) HaveCount() bool { return w.Count }
+func (w WindowAggregateCapability) HaveSum() bool   { return w.Sum }
+func (w WindowAggregateCapability) HaveFirst() bool { return w.First }
+func (w WindowAggregateCapability) HaveLast() bool  { return w.Last }

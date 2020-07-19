@@ -5,25 +5,34 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
+	"io/ioutil"
+	"math/rand"
 	nethttp "net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/influxdata/flux"
+	"github.com/influxdata/flux/csv"
 	"github.com/influxdata/flux/execute"
 	"github.com/influxdata/flux/execute/executetest"
 	"github.com/influxdata/flux/lang"
+	"github.com/influxdata/flux/runtime"
 	"github.com/influxdata/flux/values"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/cmd/influxd/launcher"
-	phttp "github.com/influxdata/influxdb/http"
-	"github.com/influxdata/influxdb/query"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/cmd/influxd/launcher"
+	phttp "github.com/influxdata/influxdb/v2/http"
+	"github.com/influxdata/influxdb/v2/kit/feature"
+	"github.com/influxdata/influxdb/v2/kit/prom"
+	"github.com/influxdata/influxdb/v2/mock"
+	"github.com/influxdata/influxdb/v2/query"
 )
 
-func TestPipeline_Write_Query_FieldKey(t *testing.T) {
-	be := launcher.RunTestLauncherOrFail(t, ctx)
+func TestLauncher_Write_Query_FieldKey(t *testing.T) {
+	be := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	be.SetupOrFail(t)
 	defer be.ShutdownOrFail(t, ctx)
 
@@ -68,8 +77,8 @@ mem,server=b value=45.2`))
 // This test initialises a default launcher writes some data,
 // and checks that the queried results contain the expected number of tables
 // and expected number of columns.
-func TestPipeline_WriteV2_Query(t *testing.T) {
-	be := launcher.RunTestLauncherOrFail(t, ctx)
+func TestLauncher_WriteV2_Query(t *testing.T) {
+	be := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	be.SetupOrFail(t)
 	defer be.ShutdownOrFail(t, ctx)
 
@@ -105,28 +114,117 @@ func TestPipeline_WriteV2_Query(t *testing.T) {
 	res.HasTableCount(t, 1)
 }
 
-// This test initializes a default launcher; writes some data; queries the data (success);
-// sets memory limits to the same read query; checks that the query fails because limits are exceeded.
-func TestPipeline_QueryMemoryLimits(t *testing.T) {
-	t.Skip("setting memory limits in the client is not implemented yet")
+func getMemoryUnused(t *testing.T, reg *prom.Registry) int64 {
+	t.Helper()
 
-	l := launcher.RunTestLauncherOrFail(t, ctx)
-	l.SetupOrFail(t)
-	defer l.ShutdownOrFail(t, ctx)
-
-	// write some points
-	for i := 0; i < 100; i++ {
-		l.WritePointsOrFail(t, fmt.Sprintf(`m,k=v1 f=%di %d`, i*100, time.Now().UnixNano()))
-	}
-
-	// compile a from query and get the spec
-	qs := fmt.Sprintf(`from(bucket:"%s") |> range(start:-5m)`, l.Bucket.Name)
-	pkg, err := flux.Parse(qs)
+	ms, err := reg.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, m := range ms {
+		if m.GetName() == "query_control_memory_unused_bytes" {
+			return int64(*m.GetMetric()[0].Gauge.Value)
+		}
+	}
+	t.Errorf("query metric for unused memory not found")
+	return 0
+}
 
-	// we expect this request to succeed
+//lint:ignore U1000 erroneously flagged by staticcheck since it is used in skipped tests
+func checkMemoryUsed(t *testing.T, l *launcher.TestLauncher, concurrency, initial int) {
+	t.Helper()
+
+	got := l.QueryController().GetUsedMemoryBytes()
+	// base memory used is equal to initial memory bytes * concurrency.
+	if want := int64(concurrency * initial); want != got {
+		t.Errorf("expected used memory %d, got %d", want, got)
+	}
+}
+
+func writeBytes(t *testing.T, l *launcher.TestLauncher, tagValue string, bs int) int {
+	// When represented in Flux, every point is:
+	//    1 byte _measurement ("m")
+	//	+ 1 byte _field ("f")
+	//  + 8 bytes _value
+	//  + len(tagValue) bytes
+	//  + 8 bytes _time
+	//  + 8 bytes _start
+	//  + 8 bytes _stop
+	//  ---------------------------
+	//  = 34 + len(tag) bytes
+	pointSize := 34 + len(tagValue)
+	if bs < pointSize {
+		bs = pointSize
+	}
+	n := bs / pointSize
+	if n*pointSize < bs {
+		n++
+	}
+	sb := strings.Builder{}
+	for i := 0; i < n; i++ {
+		sb.WriteString(fmt.Sprintf(`m,t=%s f=%di %d`, tagValue, i*100, time.Now().UnixNano()))
+		sb.WriteRune('\n')
+	}
+	l.WritePointsOrFail(t, sb.String())
+	return n * pointSize
+}
+
+type data struct {
+	Bucket   string
+	TagValue string
+	Sleep    string
+	verbose  bool
+}
+
+type queryOption func(d *data)
+
+func withTagValue(tv string) queryOption {
+	return func(d *data) {
+		d.TagValue = tv
+	}
+}
+
+func withSleep(s time.Duration) queryOption {
+	return func(d *data) {
+		d.Sleep = flux.ConvertDuration(s).String()
+	}
+}
+
+func queryPoints(ctx context.Context, t *testing.T, l *launcher.TestLauncher, opts ...queryOption) error {
+	d := &data{
+		Bucket: l.Bucket.Name,
+	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	tmpls := `from(bucket: "{{ .Bucket }}")
+	|> range(start:-5m)
+	{{- if .TagValue }}
+	// this must be pushed down to avoid unnecessary memory allocations.
+	|> filter(fn: (r) => r.t == "{{ .TagValue }}")
+	{{- end}}
+	// ensure we load everything into memory.
+	|> sort(columns: ["_time"])
+	{{- if .Sleep }}
+	// now that you have everything in memory, you can sleep.
+	|> sleep(duration: {{ .Sleep }})
+	{{- end}}`
+	tmpl, err := template.New("test-query").Parse(tmpls)
+	if err != nil {
+		return err
+	}
+	bs := new(bytes.Buffer)
+	if err := tmpl.Execute(bs, d); err != nil {
+		return err
+	}
+	qs := bs.String()
+	if d.verbose {
+		t.Logf("query:\n%s", qs)
+	}
+	pkg, err := runtime.ParseToJSON(qs)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := &query.Request{
 		Authorization:  l.Auth,
 		OrganizationID: l.Org.ID,
@@ -134,27 +232,274 @@ func TestPipeline_QueryMemoryLimits(t *testing.T) {
 			AST: pkg,
 		},
 	}
-	if err := l.QueryAndNopConsume(context.Background(), req); err != nil {
-		t.Fatal(err)
+	return l.QueryAndNopConsume(ctx, req)
+}
+
+// This test:
+//  - initializes a default launcher and sets memory limits;
+//  - writes some data;
+//  - queries the data;
+//  - verifies that the query fails (or not) and that the memory was de-allocated.
+func TestLauncher_QueryMemoryLimits(t *testing.T) {
+	tcs := []struct {
+		name           string
+		args           []string
+		err            bool
+		querySizeBytes int
+		// max_memory - per_query_memory * concurrency
+		unusedMemoryBytes int
+	}{
+		{
+			name: "ok - initial memory bytes, memory bytes, and max memory set",
+			args: []string{
+				"--query-concurrency", "1",
+				"--query-initial-memory-bytes", "100",
+				"--query-max-memory-bytes", "1048576", // 1MB
+			},
+			querySizeBytes:    30000,
+			err:               false,
+			unusedMemoryBytes: 1048476,
+		},
+		{
+			name: "error - memory bytes and max memory set",
+			args: []string{
+				"--query-concurrency", "1",
+				"--query-memory-bytes", "1",
+				"--query-max-memory-bytes", "100",
+			},
+			querySizeBytes:    2,
+			err:               true,
+			unusedMemoryBytes: 99,
+		},
+		{
+			name: "error - initial memory bytes and max memory set",
+			args: []string{
+				"--query-concurrency", "1",
+				"--query-initial-memory-bytes", "1",
+				"--query-max-memory-bytes", "100",
+			},
+			querySizeBytes:    101,
+			err:               true,
+			unusedMemoryBytes: 99,
+		},
+		{
+			name: "error - initial memory bytes, memory bytes, and max memory set",
+			args: []string{
+				"--query-concurrency", "1",
+				"--query-initial-memory-bytes", "1",
+				"--query-memory-bytes", "50",
+				"--query-max-memory-bytes", "100",
+			},
+			querySizeBytes:    51,
+			err:               true,
+			unusedMemoryBytes: 99,
+		},
 	}
 
-	// ok, the first request went well, let's add memory limits:
-	// this query should error.
-	// spec.Resources = flux.ResourceManagement{
-	// 	MemoryBytesQuota: 100,
-	// }
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			l := launcher.RunTestLauncherOrFail(t, ctx, nil, tc.args...)
+			l.SetupOrFail(t)
+			defer l.ShutdownOrFail(t, ctx)
 
-	if err := l.QueryAndNopConsume(context.Background(), req); err != nil {
-		if !strings.Contains(err.Error(), "allocation limit reached") {
-			t.Fatalf("query errored with unexpected error: %v", err)
-		}
-	} else {
-		t.Fatal("expected error, got successful query execution")
+			const tagValue = "t0"
+			writeBytes(t, l, tagValue, tc.querySizeBytes)
+			if err := queryPoints(context.Background(), t, l, withTagValue(tagValue)); err != nil {
+				if tc.err {
+					if !strings.Contains(err.Error(), "allocation limit reached") {
+						t.Errorf("query errored with unexpected error: %v", err)
+					}
+				} else {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else if tc.err {
+				t.Errorf("expected error, got successful query execution")
+			}
+
+			reg := l.Registry()
+			got := getMemoryUnused(t, reg)
+			want := int64(tc.unusedMemoryBytes)
+			if want != got {
+				t.Errorf("expected unused memory %d, got %d", want, got)
+			}
+		})
 	}
 }
 
-func TestPipeline_Query_LoadSecret_Success(t *testing.T) {
-	l := launcher.RunTestLauncherOrFail(t, ctx)
+// This test:
+//  - initializes a default launcher and sets memory limits;
+//  - writes some data;
+//  - launches a query that does not error;
+//  - launches a query that gets canceled while executing;
+//  - launches a query that does not error;
+//  - verifies after each query run the used memory.
+func TestLauncher_QueryMemoryManager_ExceedMemory(t *testing.T) {
+	t.Skip("this test is flaky, occasionally get error: \"memory allocation limit reached\" on OK query")
+
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil,
+		"--log-level", "error",
+		"--query-concurrency", "1",
+		"--query-initial-memory-bytes", "100",
+		"--query-memory-bytes", "50000",
+		"--query-max-memory-bytes", "200000",
+	)
+	l.SetupOrFail(t)
+	defer l.ShutdownOrFail(t, ctx)
+
+	// One tag does not exceed memory.
+	const tOK = "t0"
+	writeBytes(t, l, tOK, 10000)
+	// The other does.
+	const tKO = "t1"
+	writeBytes(t, l, tKO, 50001)
+
+	if err := queryPoints(context.Background(), t, l, withTagValue(tOK)); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	checkMemoryUsed(t, l, 1, 100)
+	if err := queryPoints(context.Background(), t, l, withTagValue(tKO)); err != nil {
+		if !strings.Contains(err.Error(), "allocation limit reached") {
+			t.Errorf("query errored with unexpected error: %v", err)
+		}
+	} else {
+		t.Errorf("unexpected error: %v", err)
+	}
+	checkMemoryUsed(t, l, 1, 100)
+	if err := queryPoints(context.Background(), t, l, withTagValue(tOK)); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	checkMemoryUsed(t, l, 1, 100)
+}
+
+// This test:
+//  - initializes a default launcher and sets memory limits;
+//  - writes some data;
+//  - launches a query that does not error;
+//  - launches a query and cancels its context;
+//  - launches a query that does not error;
+//  - verifies after each query run the used memory.
+func TestLauncher_QueryMemoryManager_ContextCanceled(t *testing.T) {
+	t.Skip("this test is flaky, occasionally get error: \"memory allocation limit reached\"")
+
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil,
+		"--log-level", "error",
+		"--query-concurrency", "1",
+		"--query-initial-memory-bytes", "100",
+		"--query-memory-bytes", "50000",
+		"--query-max-memory-bytes", "200000",
+	)
+	l.SetupOrFail(t)
+	defer l.ShutdownOrFail(t, ctx)
+
+	const tag = "t0"
+	writeBytes(t, l, tag, 10000)
+
+	if err := queryPoints(context.Background(), t, l, withTagValue(tag)); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	checkMemoryUsed(t, l, 1, 100)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := queryPoints(ctx, t, l, withSleep(4*time.Second)); err == nil {
+		t.Errorf("expected error got none")
+	}
+	checkMemoryUsed(t, l, 1, 100)
+	if err := queryPoints(context.Background(), t, l, withTagValue(tag)); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	checkMemoryUsed(t, l, 1, 100)
+}
+
+// This test:
+//  - initializes a default launcher and sets memory limits;
+//  - writes some data;
+//  - launches (concurrently) a mixture of
+//    - OK queries;
+//    - queries that exceed the memory limit;
+//    - queries that get canceled;
+//  - verifies the used memory.
+// Concurrency limit is set to 1, so only 1 query runs at a time and the others are queued.
+// OK queries do not overcome the soft limit, so that they can run concurrently with the ones that exceed limits.
+// The aim of this test is to verify that memory tracking works properly in the controller,
+// even in the case of concurrent/queued queries.
+func TestLauncher_QueryMemoryManager_ConcurrentQueries(t *testing.T) {
+	t.Skip("this test is flaky, occasionally get error: \"dial tcp 127.0.0.1:59654: connect: connection reset by peer\"")
+
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil,
+		"--log-level", "error",
+		"--query-queue-size", "1024",
+		"--query-concurrency", "1",
+		"--query-initial-memory-bytes", "10000",
+		"--query-memory-bytes", "50000",
+		"--query-max-memory-bytes", "200000",
+	)
+	l.SetupOrFail(t)
+	defer l.ShutdownOrFail(t, ctx)
+
+	// One tag does not exceed memory.
+	// The size is below the soft limit, so that querying this bucket never fail.
+	const tSmall = "t0"
+	writeBytes(t, l, tSmall, 9000)
+	// The other exceeds memory per query.
+	const tBig = "t1"
+	writeBytes(t, l, tBig, 100000)
+
+	const nOK = 100
+	const nMemExceeded = 100
+	const nContextCanceled = 100
+	nTotalQueries := nOK + nMemExceeded + nContextCanceled
+
+	// In order to increase the variety of the load, store and shuffle queries.
+	qs := make([]func(), 0, nTotalQueries)
+	// Flock of OK queries.
+	for i := 0; i < nOK; i++ {
+		qs = append(qs, func() {
+			if err := queryPoints(context.Background(), t, l, withTagValue(tSmall)); err != nil {
+				t.Errorf("unexpected error (ok-query %d): %v", i, err)
+			}
+		})
+	}
+	// Flock of big queries.
+	for i := 0; i < nMemExceeded; i++ {
+		qs = append(qs, func() {
+			if err := queryPoints(context.Background(), t, l, withTagValue(tBig)); err == nil {
+				t.Errorf("expected error got none (high-memory-query %d)", i)
+			} else if !strings.Contains(err.Error(), "allocation limit reached") {
+				t.Errorf("got wrong error (high-memory-query %d): %v", i, err)
+			}
+		})
+	}
+	// Flock of context canceled queries.
+	for i := 0; i < nContextCanceled; i++ {
+		qs = append(qs, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := queryPoints(ctx, t, l, withTagValue(tSmall), withSleep(4*time.Second)); err == nil {
+				t.Errorf("expected error got none (context-canceled-query %d)", i)
+			} else if !strings.Contains(err.Error(), "context") {
+				t.Errorf("got wrong error (context-canceled-query %d): %v", i, err)
+			}
+		})
+	}
+	rand.Shuffle(len(qs), func(i, j int) { qs[i], qs[j] = qs[j], qs[i] })
+
+	wg := sync.WaitGroup{}
+	wg.Add(nTotalQueries)
+	for i, q := range qs {
+		qs[i] = func() {
+			defer wg.Done()
+			q()
+		}
+	}
+	for _, q := range qs {
+		go q()
+	}
+	wg.Wait()
+	checkMemoryUsed(t, l, 1, 10000)
+}
+
+func TestLauncher_Query_LoadSecret_Success(t *testing.T) {
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	l.SetupOrFail(t)
 	defer l.ShutdownOrFail(t, ctx)
 
@@ -203,8 +548,8 @@ from(bucket: "%s")
 	}
 }
 
-func TestPipeline_Query_LoadSecret_Forbidden(t *testing.T) {
-	l := launcher.RunTestLauncherOrFail(t, ctx)
+func TestLauncher_Query_LoadSecret_Forbidden(t *testing.T) {
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	l.SetupOrFail(t)
 	defer l.ShutdownOrFail(t, ctx)
 
@@ -262,8 +607,8 @@ from(bucket: "%s")
 // written, and tableFind would complain not finding the tables.
 // This will change once we make side effects drive execution and remove from/to concurrency in our e2e tests.
 // See https://github.com/influxdata/flux/issues/1799.
-func TestPipeline_DynamicQuery(t *testing.T) {
-	l := launcher.RunTestLauncherOrFail(t, ctx)
+func TestLauncher_DynamicQuery(t *testing.T) {
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	l.SetupOrFail(t)
 	defer l.ShutdownOrFail(t, ctx)
 
@@ -337,8 +682,8 @@ stream2 |> filter(fn: (r) => contains(value: r._value, set: col)) |> group() |> 
 	}
 }
 
-func TestPipeline_Query_ExperimentalTo(t *testing.T) {
-	l := launcher.RunTestLauncherOrFail(t, ctx)
+func TestLauncher_Query_ExperimentalTo(t *testing.T) {
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	l.SetupOrFail(t)
 	defer l.ShutdownOrFail(t, ctx)
 
@@ -403,5 +748,952 @@ from(bucket: "%s")
 	// Make sure that the data we stored matches the CSV
 	if err := executetest.EqualResultIterators(csvResultIterator, fromResultIterator); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestQueryPushDowns(t *testing.T) {
+	testcases := []struct {
+		name  string
+		data  []string
+		query string
+		op    string
+		want  string
+	}{
+		{
+			name: "range last single point start time",
+			data: []string{
+				"m,tag=a f=1i 1",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00.000000001Z, stop: 1970-01-01T01:00:00Z)
+	|> last()
+`,
+			op: "readWindow(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,tag
+,,0,1970-01-01T00:00:00.000000001Z,1970-01-01T01:00:00Z,1970-01-01T00:00:00.000000001Z,1,f,m,a
+`,
+		},
+		{
+			name: "window last",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:05Z, stop: 1970-01-01T00:00:20Z)
+	|> window(every: 3s)
+	|> last()
+`,
+			op: "readWindow(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,1970-01-01T00:00:06Z,1970-01-01T00:00:05Z,5,f,m0,k0
+,,1,1970-01-01T00:00:06Z,1970-01-01T00:00:09Z,1970-01-01T00:00:08Z,0,f,m0,k0
+,,2,1970-01-01T00:00:09Z,1970-01-01T00:00:12Z,1970-01-01T00:00:11Z,7,f,m0,k0
+,,3,1970-01-01T00:00:12Z,1970-01-01T00:00:15Z,1970-01-01T00:00:14Z,9,f,m0,k0
+,,4,1970-01-01T00:00:15Z,1970-01-01T00:00:18Z,1970-01-01T00:00:15Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "bare last",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:05Z, stop: 1970-01-01T00:00:20Z)
+	|> last()
+`,
+			op: "readWindow(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,1970-01-01T00:00:20Z,1970-01-01T00:00:15Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "window empty last",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1969-12-31T23:00:00Z, stop: 1970-01-01T02:00:00Z)
+	|> window(every: 1h, createEmpty: true)
+	|> last()
+`,
+			op: "readWindow(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,0,1969-12-31T23:00:00Z,1970-01-01T00:00:00Z,,,f,m0,k0
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,1,1970-01-01T00:00:00Z,1970-01-01T01:00:00Z,1970-01-01T00:00:15Z,5,f,m0,k0
+
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,2,1970-01-01T01:00:00Z,1970-01-01T02:00:00Z,,,f,m0,k0
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+`,
+		},
+		{
+			name: "window aggregate last",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1969-12-31T23:59:59Z, stop: 1970-01-01T00:00:33Z)
+	|> aggregateWindow(every: 10s, fn: last)
+`,
+			op: "readWindow(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,0,1969-12-31T23:59:59Z,1970-01-01T00:00:33Z,1970-01-01T00:00:10Z,6,f,m0,k0
+,,0,1969-12-31T23:59:59Z,1970-01-01T00:00:33Z,1970-01-01T00:00:20Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "window first",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:05Z, stop: 1970-01-01T00:00:20Z)
+	|> window(every: 3s)
+	|> first()
+`,
+			op: "readWindow(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,1970-01-01T00:00:06Z,1970-01-01T00:00:05Z,5,f,m0,k0
+,,1,1970-01-01T00:00:06Z,1970-01-01T00:00:09Z,1970-01-01T00:00:06Z,6,f,m0,k0
+,,2,1970-01-01T00:00:09Z,1970-01-01T00:00:12Z,1970-01-01T00:00:09Z,6,f,m0,k0
+,,3,1970-01-01T00:00:12Z,1970-01-01T00:00:15Z,1970-01-01T00:00:12Z,5,f,m0,k0
+,,4,1970-01-01T00:00:15Z,1970-01-01T00:00:18Z,1970-01-01T00:00:15Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "window first string",
+			data: []string{
+				"m,tag=a f=\"c\" 2000000000",
+				"m,tag=a f=\"d\" 3000000000",
+				"m,tag=a f=\"h\" 7000000000",
+				"m,tag=a f=\"i\" 8000000000",
+				"m,tag=a f=\"j\" 9000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:10Z)
+	|> window(every: 5s)
+	|> first()
+`,
+			op: "readWindow(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,string,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,tag
+,,0,1970-01-01T00:00:00Z,1970-01-01T00:00:05Z,1970-01-01T00:00:02Z,c,f,m,a
+,,1,1970-01-01T00:00:05Z,1970-01-01T00:00:10Z,1970-01-01T00:00:07Z,h,f,m,a
+`,
+		},
+		{
+			name: "bare first",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:05Z, stop: 1970-01-01T00:00:20Z)
+	|> first()
+`,
+			op: "readWindow(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,1970-01-01T00:00:20Z,1970-01-01T00:00:05Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "window empty first",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:02Z)
+	|> window(every: 500ms, createEmpty: true)
+	|> first()
+`,
+			op: "readWindow(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,_result,table,_start,_stop,_time,_value,_field,_measurement,k
+,_result,0,1970-01-01T00:00:00Z,1970-01-01T00:00:00.5Z,1970-01-01T00:00:00Z,0,f,m0,k0
+
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,1,1970-01-01T00:00:00.5Z,1970-01-01T00:00:01Z,,,f,m0,k0
+,_result,table,_start,_stop,_time,_value,_field,_measurement,k
+
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,_result,table,_start,_stop,_time,_value,_field,_measurement,k
+,_result,2,1970-01-01T00:00:01Z,1970-01-01T00:00:01.5Z,1970-01-01T00:00:01Z,1,f,m0,k0
+
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,3,1970-01-01T00:00:01.5Z,1970-01-01T00:00:02Z,,,f,m0,k0
+,_result,table,_start,_stop,_time,_value,_field,_measurement,k
+`,
+		},
+		{
+			name: "window aggregate first",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:02Z)
+	|> aggregateWindow(every: 500ms, fn: first)
+`,
+			op: "readWindow(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,false,true,true,true
+#default,_result,,,,,,,,
+,result,table,_start,_stop,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:00Z,1970-01-01T00:00:02Z,1970-01-01T00:00:00.5Z,0,f,m0,k0
+,,0,1970-01-01T00:00:00Z,1970-01-01T00:00:02Z,1970-01-01T00:00:01.5Z,1,f,m0,k0
+`,
+		},
+		{
+			name: "window count removes empty series",
+			data: []string{
+				"m,tag=a f=0i 1500000000",
+				"m,tag=b f=1i 2500000000",
+				"m,tag=c f=2i 3500000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:01Z, stop: 1970-01-01T00:00:02Z)
+	|> window(every: 500ms, createEmpty: true)
+	|> count()
+`,
+			op: "readWindow(count)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,true,true,true
+#default,_result,,,,,,,
+,result,table,_start,_stop,_value,_field,_measurement,tag
+,_result,0,1970-01-01T00:00:01Z,1970-01-01T00:00:01.5Z,0,f,m,a
+,_result,1,1970-01-01T00:00:01.5Z,1970-01-01T00:00:02Z,1,f,m,a
+`,
+		},
+		{
+			name: "count",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> aggregateWindow(every: 5s, fn: count)
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readWindow(count)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long,string,string,string
+#group,false,false,false,false,true,true,true
+#default,_result,,,,,,
+,result,table,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,5,f,m0,k0
+,,0,1970-01-01T00:00:10Z,5,f,m0,k0
+,,0,1970-01-01T00:00:15Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "count with nulls",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> aggregateWindow(every: 5s, fn: count)
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readWindow(count)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long,string,string,string
+#group,false,false,false,false,true,true,true
+#default,_result,,,,,,
+,result,table,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,5,f,m0,k0
+,,0,1970-01-01T00:00:10Z,0,f,m0,k0
+,,0,1970-01-01T00:00:15Z,5,f,m0,k0
+`,
+		},
+		{
+			name: "bare count",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> count()
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readWindow(count)",
+			want: `
+#group,false,false,false,true,true,true
+#datatype,string,long,long,string,string,string
+#default,_result,,,,,
+,result,table,_value,_field,_measurement,k
+,,0,15,f,m0,k0
+`,
+		},
+		{
+			name: "window sum removes empty series",
+			data: []string{
+				"m,tag=a f=1i 1500000000",
+				"m,tag=a f=2i 1600000000",
+				"m,tag=b f=3i 2500000000",
+				"m,tag=c f=4i 3500000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:01Z, stop: 1970-01-01T00:00:02Z)
+	|> window(every: 500ms, createEmpty: true)
+	|> sum()
+`,
+			op: "readWindow(sum)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,long,string,string,string
+#group,false,false,true,true,false,true,true,true
+#default,_result,,,,,,,
+,result,table,_start,_stop,_value,_field,_measurement,tag
+,_result,0,1970-01-01T00:00:01Z,1970-01-01T00:00:01.5Z,,f,m,a
+,_result,1,1970-01-01T00:00:01.5Z,1970-01-01T00:00:02Z,3,f,m,a
+`,
+		},
+		{
+			name: "sum",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> aggregateWindow(every: 5s, fn: sum)
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readWindow(sum)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long,string,string,string
+#group,false,false,false,false,true,true,true
+#default,_result,,,,,,
+,result,table,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,10,f,m0,k0
+,,0,1970-01-01T00:00:10Z,22,f,m0,k0
+,,0,1970-01-01T00:00:15Z,35,f,m0,k0
+`,
+		},
+		{
+			name: "sum with nulls",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> aggregateWindow(every: 5s, fn: sum)
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readWindow(sum)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long,string,string,string
+#group,false,false,false,false,true,true,true
+#default,_result,,,,,,
+,result,table,_time,_value,_field,_measurement,k
+,,0,1970-01-01T00:00:05Z,10,f,m0,k0
+,,0,1970-01-01T00:00:10Z,,f,m0,k0
+,,0,1970-01-01T00:00:15Z,35,f,m0,k0
+`,
+		},
+		{
+			name: "bare sum",
+			data: []string{
+				"m0,k=k0 f=0i 0",
+				"m0,k=k0 f=1i 1000000000",
+				"m0,k=k0 f=2i 2000000000",
+				"m0,k=k0 f=3i 3000000000",
+				"m0,k=k0 f=4i 4000000000",
+				"m0,k=k0 f=5i 5000000000",
+				"m0,k=k0 f=6i 6000000000",
+				"m0,k=k0 f=5i 7000000000",
+				"m0,k=k0 f=0i 8000000000",
+				"m0,k=k0 f=6i 9000000000",
+				"m0,k=k0 f=6i 10000000000",
+				"m0,k=k0 f=7i 11000000000",
+				"m0,k=k0 f=5i 12000000000",
+				"m0,k=k0 f=8i 13000000000",
+				"m0,k=k0 f=9i 14000000000",
+				"m0,k=k0 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> sum()
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readWindow(sum)",
+			want: `
+#group,false,false,false,true,true,true
+#datatype,string,long,long,string,string,string
+#default,_result,,,,,
+,result,table,_value,_field,_measurement,k
+,,0,67,f,m0,k0
+`,
+		},
+		{
+			name: "group first",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 0)
+	|> group(columns: ["k"])
+	|> first()
+	|> keep(columns: ["_time", "_value"])
+`,
+			op: "readGroup(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long
+#group,false,false,false,false
+#default,_result,,,
+,result,table,_time,_value
+,,0,1970-01-01T00:00:00.00Z,0
+`,
+		},
+		{
+			name: "group none first",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 0)
+	|> group()
+	|> first()
+	|> keep(columns: ["_time", "_value"])
+`,
+			op: "readGroup(first)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long
+#group,false,false,false,false
+#default,_result,,,
+,result,table,_time,_value
+,,0,1970-01-01T00:00:00.00Z,0
+`,
+		},
+		{
+			name: "group last",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 0)
+	|> group(columns: ["k"])
+	|> last()
+	|> keep(columns: ["_time", "_value"])
+`,
+			op: "readGroup(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long
+#group,false,false,false,false
+#default,_result,,,
+,result,table,_time,_value
+,,0,1970-01-01T00:00:15.00Z,5
+`,
+		},
+		{
+			name: "group none last",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 0)
+	|> group()
+	|> last()
+	|> keep(columns: ["_time", "_value"])
+`,
+			op: "readGroup(last)",
+			want: `
+#datatype,string,long,dateTime:RFC3339,long
+#group,false,false,false,false
+#default,_result,,,
+,result,table,_time,_value
+,,0,1970-01-01T00:00:15.00Z,5
+`,
+		},
+		{
+			name: "count group none",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> group()
+	|> count()
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readGroup(count)",
+			want: `
+#datatype,string,long,long
+#group,false,false,false
+#default,_result,,
+,result,table,_value
+,,0,15
+`,
+		},
+		{
+			name: "count group",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			op: "readGroup(count)",
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> group(columns: ["kk"])
+	|> count()
+	|> drop(columns: ["_start", "_stop"])
+`,
+			want: `
+#datatype,string,long,string,long
+#group,false,false,true,false
+#default,_result,,,
+,result,table,kk,_value
+,,0,kk0,8
+,,1,kk1,7
+`,
+		},
+		{
+			name: "sum group none",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> group()
+	|> sum()
+	|> drop(columns: ["_start", "_stop"])
+`,
+			op: "readGroup(sum)",
+			want: `
+#datatype,string,long,long
+#group,false,false,false
+#default,_result,,
+,result,table,_value
+,,0,67
+`,
+		},
+		{
+			name: "sum group",
+			data: []string{
+				"m0,k=k0,kk=kk0 f=0i 0",
+				"m0,k=k0,kk=kk1 f=1i 1000000000",
+				"m0,k=k0,kk=kk0 f=2i 2000000000",
+				"m0,k=k0,kk=kk1 f=3i 3000000000",
+				"m0,k=k0,kk=kk0 f=4i 4000000000",
+				"m0,k=k0,kk=kk1 f=5i 5000000000",
+				"m0,k=k0,kk=kk0 f=6i 6000000000",
+				"m0,k=k0,kk=kk1 f=5i 7000000000",
+				"m0,k=k0,kk=kk0 f=0i 8000000000",
+				"m0,k=k0,kk=kk1 f=6i 9000000000",
+				"m0,k=k0,kk=kk0 f=6i 10000000000",
+				"m0,k=k0,kk=kk1 f=7i 11000000000",
+				"m0,k=k0,kk=kk0 f=5i 12000000000",
+				"m0,k=k0,kk=kk1 f=8i 13000000000",
+				"m0,k=k0,kk=kk0 f=9i 14000000000",
+				"m0,k=k0,kk=kk1 f=5i 15000000000",
+			},
+			op: "readGroup(sum)",
+			query: `
+from(bucket: v.bucket)
+	|> range(start: 1970-01-01T00:00:00Z, stop: 1970-01-01T00:00:15Z)
+	|> group(columns: ["kk"])
+	|> sum()
+	|> drop(columns: ["_start", "_stop"])
+`,
+			want: `
+#datatype,string,long,string,long
+#group,false,false,true,false
+#default,_result,,,
+,result,table,kk,_value
+,,0,kk0,32
+,,1,kk1,35
+`,
+		},
+	}
+	for _, tc := range testcases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			l := launcher.RunTestLauncherOrFail(t, ctx, mock.NewFlagger(map[feature.Flag]interface{}{
+				feature.PushDownWindowAggregateCount(): true,
+				feature.PushDownWindowAggregateSum():   true,
+			}))
+
+			l.SetupOrFail(t)
+			defer l.ShutdownOrFail(t, ctx)
+
+			l.WritePointsOrFail(t, strings.Join(tc.data, "\n"))
+
+			queryStr := "v = {bucket: " + "\"" + l.Bucket.Name + "\"" + "}\n" + tc.query
+
+			res := l.MustExecuteQuery(queryStr)
+			defer res.Done()
+			got := flux.NewSliceResultIterator(res.Results)
+			defer got.Release()
+
+			dec := csv.NewMultiResultDecoder(csv.ResultDecoderConfig{})
+			want, err := dec.Decode(ioutil.NopCloser(strings.NewReader(tc.want)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer want.Release()
+
+			if err := executetest.EqualResultIterators(want, got); err != nil {
+				t.Fatal(err)
+			}
+			if want, got := uint64(1), l.NumReads(t, tc.op); want != got {
+				t.Fatalf("unexpected sample count -want/+got:\n\t- %d\n\t+ %d", want, got)
+			}
+		})
 	}
 }

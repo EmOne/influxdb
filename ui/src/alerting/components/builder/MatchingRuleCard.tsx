@@ -30,20 +30,18 @@ const MatchingRuleCard: FC<Props> = ({rule, endpoints}) => {
   const endpoint = endpoints.find(e => e.id === rule.endpointID)
 
   return (
-    <ResourceCard
-      key={`rule-id--${rule.id}`}
-      testID="rule-card"
-      name={<ResourceCard.Name name={rule.name} />}
-      description={<ResourceCard.Description description={rule.description} />}
-      metaData={[
-        <>{`Checks every: ${rule.every}`}</>,
-        <>{`Sends notifications to: ${endpoint.name}`}</>,
-      ]}
-    />
+    <ResourceCard key={`rule-id--${rule.id}`} testID="rule-card">
+      <ResourceCard.Name name={rule.name} />
+      <ResourceCard.Description description={rule.description} />
+      <ResourceCard.Meta>
+        <>{`Checks every: ${rule.every}`}</>
+        <>{`Sends notifications to: ${endpoint.name}`}</>
+      </ResourceCard.Meta>
+    </ResourceCard>
   )
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const endpoints = getAll<NotificationEndpoint>(
     state,
     ResourceType.NotificationEndpoints

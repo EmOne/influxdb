@@ -1,6 +1,6 @@
 // Libraries
-import React, {PureComponent, MouseEvent} from 'react'
-import {connect} from 'react-redux'
+import React, {PureComponent} from 'react'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Actions
 import {
@@ -11,14 +11,15 @@ import {
 // Components
 import {
   ComponentSize,
+  FlexBox,
+  InputLabel,
   SlideToggle,
   ComponentColor,
-  IndexList,
-  Alignment,
-  ConfirmationButton,
-  Appearance,
+  ResourceCard,
+  IconFont,
 } from '@influxdata/clockface'
-import EditableName from 'src/shared/components/EditableName'
+
+import {Context} from 'src/clockface'
 
 // Types
 import {Authorization} from 'src/types'
@@ -29,50 +30,53 @@ interface OwnProps {
   onClickDescription: (authID: string) => void
 }
 
-interface DispatchProps {
-  onDelete: typeof deleteAuthorization
-  onUpdate: typeof updateAuthorization
-}
+type ReduxProps = ConnectedProps<typeof connector>
 
-type Props = DispatchProps & OwnProps
+type Props = ReduxProps & OwnProps
 
 class TokenRow extends PureComponent<Props> {
   public render() {
     const {description} = this.props.auth
-
+    const {auth} = this.props
+    const labelText = this.isTokenEnabled ? 'Active' : 'Inactive'
     return (
-      <IndexList.Row brighten={true}>
-        <IndexList.Cell>
-          <EditableName
-            name={description}
-            onUpdate={this.handleUpdateName}
-            noNameString={DEFAULT_TOKEN_DESCRIPTION}
-            onEditName={this.handleClickDescription}
-          />
-        </IndexList.Cell>
-        <IndexList.Cell>
+      <ResourceCard
+        contextMenu={this.contextMenu}
+        testID={`token-card ${auth.description}`}
+      >
+        <ResourceCard.EditableName
+          onUpdate={this.handleUpdateName}
+          onClick={this.handleClickDescription}
+          name={description}
+          noNameString={DEFAULT_TOKEN_DESCRIPTION}
+          testID={`token-name ${auth.description}`}
+        />
+        <ResourceCard.Meta>
+          {[<>Created at: {auth.createdAt}</>]}
+        </ResourceCard.Meta>
+        <FlexBox margin={ComponentSize.Small}>
           <SlideToggle
             active={this.isTokenEnabled}
             size={ComponentSize.ExtraSmall}
             onChange={this.changeToggle}
-            color={ComponentColor.Success}
           />
-        </IndexList.Cell>
-        <IndexList.Cell alignment={Alignment.Right} revealOnHover={true}>
-          <ConfirmationButton
+          <InputLabel active={this.isTokenEnabled}>{labelText}</InputLabel>
+        </FlexBox>
+      </ResourceCard>
+    )
+  }
+
+  private get contextMenu(): JSX.Element {
+    return (
+      <Context>
+        <Context.Menu icon={IconFont.Trash} color={ComponentColor.Danger}>
+          <Context.Item
+            label="Delete"
+            action={this.handleDelete}
             testID="delete-token"
-            size={ComponentSize.ExtraSmall}
-            text="Delete"
-            confirmationLabel="Really delete this token?"
-            confirmationButtonText="Confirm"
-            confirmationButtonColor={ComponentColor.Danger}
-            popoverAppearance={Appearance.Outline}
-            popoverColor={ComponentColor.Danger}
-            color={ComponentColor.Danger}
-            onConfirm={this.handleDelete}
           />
-        </IndexList.Cell>
-      </IndexList.Row>
+        </Context.Menu>
+      </Context>
     )
   }
 
@@ -96,11 +100,8 @@ class TokenRow extends PureComponent<Props> {
     this.props.onDelete(id, description)
   }
 
-  private handleClickDescription = (e: MouseEvent<HTMLAnchorElement>) => {
+  private handleClickDescription = () => {
     const {onClickDescription, auth} = this.props
-
-    e.preventDefault()
-
     onClickDescription(auth.id)
   }
 
@@ -115,7 +116,6 @@ const mdtp = {
   onUpdate: updateAuthorization,
 }
 
-export default connect<{}, DispatchProps, OwnProps>(
-  null,
-  mdtp
-)(TokenRow)
+const connector = connect(null, mdtp)
+
+export default connector(TokenRow)

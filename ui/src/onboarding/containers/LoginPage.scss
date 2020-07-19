@@ -1,12 +1,3 @@
-.clockface--app-wrapper.sign-up--page {
-  .cf-funnel-page {
-    background-image: url('../../assets/images/influxLogoBg.svg');
-    background-position: center;
-    background-repeat: none;
-    background-size: cover;
-  }
-}
-
 .create-account--button {
   margin: 15px 0;
 }
@@ -39,16 +30,14 @@
 }
 
 .heading--margins {
-  margin-bottom: $ix-marg-c;
+  margin: $ix-marg-c 0;
 }
 
-.login--forgot-password {
-  color: $c-pool;
-  line-height: 15px;
-  text-align: left;
-  cursor: pointer;
-  margin-left: $ix-marg-b;
+.helper-link-text {
   font-size: 0.85em; // TODO(ariel): remove when clockface font resolves HeadingElement.H6 styling
+  a {
+    font-weight: 400;
+  }
 }
 
 .sign-up--form {
@@ -59,10 +48,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-
-  .sign-up--form-padded-row {
-    padding-top: $ix-marg-d;
-  }
+  margin-top: $ix-marg-d;
 }
 
 .sign-up--form-panel {

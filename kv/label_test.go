@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
-	influxdbtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
+	influxdbtesting "github.com/influxdata/influxdb/v2/testing"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -27,14 +27,11 @@ func initBoltLabelService(f influxdbtesting.LabelFields, t *testing.T) (influxdb
 	}
 }
 
-func initLabelService(s kv.Store, f influxdbtesting.LabelFields, t *testing.T) (influxdb.LabelService, string, func()) {
+func initLabelService(s kv.SchemaStore, f influxdbtesting.LabelFields, t *testing.T) (influxdb.LabelService, string, func()) {
+	ctx := context.Background()
 	svc := kv.NewService(zaptest.NewLogger(t), s)
 	svc.IDGenerator = f.IDGenerator
 
-	ctx := context.Background()
-	if err := svc.Initialize(ctx); err != nil {
-		t.Fatalf("error initializing label service: %v", err)
-	}
 	for _, l := range f.Labels {
 		if err := svc.PutLabel(ctx, l); err != nil {
 			t.Fatalf("failed to populate labels: %v", err)

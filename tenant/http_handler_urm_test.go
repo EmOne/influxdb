@@ -12,9 +12,9 @@ import (
 
 	"github.com/go-chi/chi"
 	"github.com/google/go-cmp/cmp"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
-	"github.com/influxdata/influxdb/tenant"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
+	"github.com/influxdata/influxdb/v2/tenant"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -98,8 +98,7 @@ func TestUserResourceMappingService_GetMembersHandler(t *testing.T) {
 			"status": "active"
 		}
 	]
-}
-`,
+}`,
 			},
 		},
 
@@ -162,8 +161,7 @@ func TestUserResourceMappingService_GetMembersHandler(t *testing.T) {
 			"status": "active"
 		}
 	]
-}
-`,
+}`,
 			},
 		},
 	}
@@ -273,8 +271,7 @@ func TestUserResourceMappingService_PostMembersHandler(t *testing.T) {
 	"id": "0000000000000001",
 	"name": "user0000000000000001",
 	"status": "active"
-}
-`,
+}`,
 			},
 		},
 
@@ -312,8 +309,7 @@ func TestUserResourceMappingService_PostMembersHandler(t *testing.T) {
 	"id": "0000000000000002",
 	"name": "user0000000000000002",
 	"status": "active"
-}
-`,
+}`,
 			},
 		},
 	}

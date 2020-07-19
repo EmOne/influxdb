@@ -1,42 +1,40 @@
 import {MeState} from 'src/shared/reducers/me'
 import {client} from 'src/utils/api'
-import {CLOUD} from 'src/shared/constants'
 import HoneyBadger from 'honeybadger-js'
-import {fireUserDataReady} from 'src/shared/utils/analytics'
+import {updateReportingContext, gaEvent} from 'src/cloud/utils/reporting'
 
-export enum ActionTypes {
-  SetMe = 'SET_ME',
-}
+export const SET_ME = 'SET_ME'
 
-export interface SetMe {
-  type: ActionTypes.SetMe
-  payload: {
-    me: MeState
-  }
-}
+export type Actions = ReturnType<typeof setMe>
 
-export type Actions = SetMe
-
-export const setMe = me => ({
-  type: ActionTypes.SetMe,
-  payload: {
-    me,
-  },
-})
+export const setMe = (me: MeState) =>
+  ({
+    type: SET_ME,
+    payload: {
+      me,
+    },
+  } as const)
 
 export const getMe = () => async dispatch => {
   try {
     const user = await client.users.me()
+    updateReportingContext({userID: user.id, userEmail: user.name})
 
-    if (CLOUD) {
-      fireUserDataReady(user.id, user.name)
-    }
+    gaEvent('cloudAppUserDataReady', {
+      identity: {
+        id: user.id,
+        email: user.name,
+      },
+    })
 
+    updateReportingContext({
+      userID: user.id,
+    })
     HoneyBadger.setContext({
       user_id: user.id,
     })
 
-    dispatch(setMe(user))
+    dispatch(setMe(user as MeState))
   } catch (error) {
     console.error(error)
   }

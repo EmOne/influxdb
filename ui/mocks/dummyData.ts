@@ -1,3 +1,4 @@
+import {match} from 'react-router'
 import {ViewProperties} from 'src/client'
 import {
   Cell,
@@ -9,7 +10,7 @@ import {
   Label,
 } from 'src/types'
 import {OnboardingStepProps} from 'src/onboarding/containers/OnboardingWizard'
-import {WithRouterProps} from 'react-router'
+import {RouteComponentProps} from 'react-router-dom'
 import {NumericColumnData} from '@influxdata/giraffe'
 import {
   Source,
@@ -32,6 +33,9 @@ import {
   Permission,
   PermissionResource,
 } from '@influxdata/influx'
+import {SortTypes} from 'src/shared/utils/sort'
+import {Sort} from '@influxdata/clockface'
+import {DashboardSortKey} from 'src/shared/components/resource_sort_dropdown/generateSortItems'
 
 export const links: Links = {
   authorizations: '/api/v2/authorizations',
@@ -147,6 +151,12 @@ export const query = {
   shifts: [],
 }
 
+const defaultSortOptions = {
+  sortDirection: Sort.Ascending,
+  sortType: SortTypes.String,
+  sortKey: 'name' as DashboardSortKey,
+}
+
 // Dashboards
 export const dashboard: Dashboard = {
   id: '1',
@@ -163,6 +173,7 @@ export const dashboard: Dashboard = {
   },
   labels: [],
   status: RemoteDataState.Done,
+  sortOptions: defaultSortOptions,
 }
 
 export const labels: Label[] = [
@@ -203,6 +214,7 @@ export const dashboardWithLabels: Dashboard = {
   },
   status: RemoteDataState.Done,
   labels: labelIDs,
+  sortOptions: defaultSortOptions,
 }
 
 export const cell: Cell = {
@@ -283,14 +295,21 @@ export const defaultOnboardingStepProps: OnboardingStepProps = {
   notify: jest.fn(),
   onCompleteSetup: jest.fn(),
   onExit: jest.fn(),
-  onSetSubstepIndex: jest.fn(),
 }
 
-export const withRouterProps: WithRouterProps = {
-  params: {},
+const match: match<{orgID: string}> = {
+  isExact: false,
+  path: '',
+  url: '',
+  params: {
+    orgID: '1',
+  },
+}
+
+export const withRouterProps: RouteComponentProps<{orgID: string}> = {
+  match,
   location: null,
-  routes: null,
-  router: null,
+  history: null,
 }
 
 export const token =
@@ -516,6 +535,7 @@ export const buckets = [
     orgID: '034a0adc49a6b000',
     name: 'newbuck',
     retentionRules: [],
+    readableRetention: 'forever',
     labels: [],
   },
   {
@@ -529,6 +549,7 @@ export const buckets = [
     orgID: '034a0adc49a6b000',
     name: 'newbuck1',
     retentionRules: [],
+    readableRetention: 'forever',
     labels: [],
   },
 ]
@@ -997,6 +1018,7 @@ export const viewProperties: ViewProperties = {
   xColumn: '_time',
   yColumn: '_value',
   shadeBelow: true,
+  hoverDimension: 'y',
   position: 'overlaid',
 }
 

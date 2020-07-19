@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
-	influxdbtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
+	influxdbtesting "github.com/influxdata/influxdb/v2/testing"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -27,13 +27,9 @@ func initBoltKeyValueLog(f influxdbtesting.KeyValueLogFields, t *testing.T) (inf
 	}
 }
 
-func initKeyValueLog(s kv.Store, f influxdbtesting.KeyValueLogFields, t *testing.T) (influxdb.KeyValueLog, func()) {
-	svc := kv.NewService(zaptest.NewLogger(t), s)
-
+func initKeyValueLog(s kv.SchemaStore, f influxdbtesting.KeyValueLogFields, t *testing.T) (influxdb.KeyValueLog, func()) {
 	ctx := context.Background()
-	if err := svc.Initialize(ctx); err != nil {
-		t.Fatalf("error initializing organization service: %v", err)
-	}
+	svc := kv.NewService(zaptest.NewLogger(t), s)
 
 	for _, e := range f.LogEntries {
 		if err := svc.AddLogEntry(ctx, e.Key, e.Value, e.Time); err != nil {

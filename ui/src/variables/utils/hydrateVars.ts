@@ -2,6 +2,7 @@
 import {valueFetcher, ValueFetcher} from 'src/variables/utils/ValueFetcher'
 import Deferred from 'src/utils/Deferred'
 import {asAssignment} from 'src/variables/selectors'
+import {isFlagEnabled} from 'src/shared/utils/featureFlag'
 
 // Constants
 import {OPTION_NAME, BOUNDARY_GROUP} from 'src/variables/constants/index'
@@ -11,7 +12,6 @@ import {
   RemoteDataState,
   Variable,
   VariableValues,
-  VariableValuesByID,
   ValueSelections,
 } from 'src/types'
 import {CancelBox, CancellationError} from 'src/types/promises'
@@ -30,46 +30,51 @@ interface HydrateVarsOptions {
   orgID: string
   selections?: ValueSelections
   fetcher?: ValueFetcher
+  skipCache?: boolean
+}
+
+export interface EventedCancelBox<T> extends CancelBox<T> {
+  on?: any
 }
 
 export const createVariableGraph = (
   allVariables: Variable[]
 ): VariableNode[] => {
-  const nodesByID: {[variableID: string]: VariableNode} = {}
-
-  // First initialize all the nodes
-  for (const variable of allVariables) {
-    nodesByID[variable.id] = {
-      variable,
-      values: null,
-      parents: [],
-      children: [],
-      status: RemoteDataState.NotStarted,
-      cancel: () => {},
-    }
-  }
+  const nodesByID: {[variableID: string]: VariableNode} = allVariables.reduce(
+    (prev, curr) => {
+      let status = RemoteDataState.Done
+      if (curr.arguments.type === 'query') {
+        status = RemoteDataState.NotStarted
+      }
+      prev[curr.id] = {
+        variable: curr,
+        values: null,
+        parents: [],
+        children: [],
+        status,
+        cancel: () => {},
+      }
+      return prev
+    },
+    {}
+  )
 
   // Then initialize all the edges (the `parents` and `children` references)
-  for (const variable of allVariables) {
-    if (!isQueryVar(variable)) {
-      continue
-    }
-
-    const childIDs = getVarChildren(variable, allVariables).map(
-      child => child.id
-    )
-
-    for (const childID of childIDs) {
-      nodesByID[variable.id].children.push(nodesByID[childID])
-      nodesByID[childID].parents.push(nodesByID[variable.id])
-    }
-  }
+  Object.keys(nodesByID)
+    .filter(k => nodesByID[k].variable.arguments.type === 'query')
+    .forEach(k => {
+      getVarChildren(nodesByID[k].variable, allVariables)
+        .map(child => child.id)
+        .forEach(c => {
+          nodesByID[k].children.push(nodesByID[c])
+          nodesByID[c].parents.push(nodesByID[k])
+        })
+    })
 
   return Object.values(nodesByID)
 }
 
-const isQueryVar = (v: Variable) => v.arguments.type === 'query'
-export const isInQuery = (query: string, v: Variable) => {
+export const isInQuery = (query: string, v: Variable): boolean => {
   const regexp = new RegExp(
     `${BOUNDARY_GROUP}${OPTION_NAME}.${v.name}${BOUNDARY_GROUP}`
   )
@@ -108,6 +113,78 @@ const collectAncestors = (
 }
 
 /*
+  Using the current node as the root, create a PostOrder DFS for the given node
+  Where we check each cascading parent's children in order to hydrate the children before the parents
+
+  In the example below, we have 3 variables `a`, `b`, `c` where `a` is a parent to `b`, which a parent to `c`:
+
+  a --> b --> c
+
+  If `a`, `b`, or `c` are passed into this function, we should expect that the output for each should be:
+
+  `c` with a reference to its parent `b`, which should have a reference to its parent `a`
+*/
+
+const postOrderDFS = (
+  node: VariableNode,
+  acc: Set<VariableNode> = new Set(),
+  cache: {[key: string]: boolean | undefined} = {}
+): VariableNode[] => {
+  // Handle the edge case that the function is
+  // called without providing the root node
+  if (!node) return [...acc]
+
+  for (const child of node.children) {
+    // by checking the cache for existing variables, we ensure that the graph stops
+    // when an existing node has already been encountered, invalidating a cycle if one exists
+    if (!cache[child.variable.id]) {
+      cache[child.variable.id] = true
+      // Recurse down the n-ary tree until we reach a leaf (node with no children)
+      // where this loop will not execute
+      postOrderDFS(child, acc, cache)
+    }
+  }
+
+  // Add the current node only after visiting all of its children, left to right
+  acc.add(node)
+
+  return [...acc]
+}
+
+/*
+  Filters out any parents that have already been referenced in a previous node
+
+  A node `a` & `c` are children of `b` if there exists a path:
+
+            b
+          /   \
+         a     c
+
+  This function safely filters out a duplicate reference to the parent `b`
+  When both `a` and `c` are passed as variables to be hydrated, since `b` should
+  already be `hydrated` by the first variable that is passed in.
+*/
+export interface DeduplicatedRoot {
+  node: VariableNode
+  subsetIDs: {[key: string]: boolean}
+}
+
+const getDeduplicatedRootChild = (
+  node: VariableNode,
+  subsetIDs: {[key: string]: boolean | undefined}
+): DeduplicatedRoot => {
+  for (const n of node.parents) {
+    if (!subsetIDs[n.variable.id]) {
+      subsetIDs[n.variable.id] = true
+      getDeduplicatedRootChild(n, subsetIDs)
+    } else {
+      node.parents = []
+    }
+  }
+  return {node, subsetIDs}
+}
+
+/*
   Given a variable graph, return the minimal subgraph containing only the nodes
   needed to hydrate the values for variables in the passed `variables` argument.
 
@@ -117,17 +194,66 @@ const collectAncestors = (
   - The node for one of the passed variables depends on this node
 
 */
-const findSubgraph = (
+// TODO(ariel): rename this back to findSubgraph & update tests once feature flag is removed
+export const findSubgraphFeature = (
   graph: VariableNode[],
   variables: Variable[]
 ): VariableNode[] => {
   const subgraph: Set<VariableNode> = new Set()
+  // use an ID array to reduce the chance of reference errors
+  const varIDs = variables.map(v => v.id)
+  // create an ID reference object to identify relevant root variables to hydrate
+  let subgraphIDs = {}
+  for (const node of graph) {
+    const shouldKeep = varIDs.includes(node.variable.id)
+    if (shouldKeep) {
+      const postOrderNodeList = postOrderDFS(node)
+      postOrderNodeList.forEach(variableNode => {
+        const {id} = variableNode.variable
+        // Checking whether the subgraphIDs[id] !== true, we are ensuring that the
+        // node has been added to the subgraph. This prevents excessive variable rehydration
+        if (subgraphIDs[id] !== true) {
+          /*
+            Once a node exists within the subgraph (whether nested as a parent or as the input node)
+            we want to remove any further reference to that node within the subgraph.
+            This can be particularly challenging when a parent node has multiple child nodes that have been passed in.
+            For example, if variables `a` and `b` are both children to `c`,
+            and `a` & `b` are both variables that should be hydrated, we would need to reset a parent
+            reference for one of the variables so that `c` is not hydrated twice.
+            This can be achieved by storing a reference to all the existing nodeIDs within the subgraph to the `graphIDs`
+            and checking for any collisions before adding the node to the subgraph.
+            If a parent collision is detected, that node's parent is simply set to [] since we know that
+            the parent was already hydrated based on a previous input
+          */
+          const {node: filteredNodes, subsetIDs} = getDeduplicatedRootChild(
+            variableNode,
+            subgraphIDs
+          )
+          subgraph.add(filteredNodes)
+          subgraphIDs = {
+            [id]: true,
+            ...subgraphIDs,
+            ...subsetIDs,
+          }
+        }
+      })
+    }
+  }
 
+  return [...subgraph]
+}
+export const findSubgraph = (
+  graph: VariableNode[],
+  variables: Variable[]
+): VariableNode[] => {
+  const subgraph: Set<VariableNode> = new Set()
+  // use an ID array to reduce the chance of reference errors
+  const varIDs = variables.map(v => v.id)
   for (const node of graph) {
     const shouldKeep =
-      variables.includes(node.variable) ||
+      varIDs.includes(node.variable.id) ||
       collectAncestors(node).some(ancestor =>
-        variables.includes(ancestor.variable)
+        varIDs.includes(ancestor.variable.id)
       )
 
     if (shouldKeep) {
@@ -139,7 +265,6 @@ const findSubgraph = (
     node.parents = node.parents.filter(node => subgraph.has(node))
     node.children = node.children.filter(node => subgraph.has(node))
   }
-
   return [...subgraph]
 }
 
@@ -181,9 +306,11 @@ export const collectDescendants = (
 
   This assumes that every descendant of this node has already been hydrated.
 */
+// TODO: figure out how to type the `on` function
 const hydrateVarsHelper = async (
   node: VariableNode,
-  options: HydrateVarsOptions
+  options: HydrateVarsOptions,
+  on?: any
 ): Promise<VariableValues> => {
   const variableType = node.variable.arguments.type
 
@@ -204,19 +331,53 @@ const hydrateVarsHelper = async (
     }
   }
 
+  if (variableType === 'system') {
+    return {
+      valueType: 'string',
+      values: node.variable.arguments.values,
+      selected: node.variable.selected,
+    }
+  }
+
+  if (node.status !== RemoteDataState.Loading) {
+    node.status = RemoteDataState.Loading
+    on.fire('status', node.variable, node.status)
+    collectAncestors(node)
+      .filter(parent => parent.variable.arguments.type === 'query')
+      .forEach(parent => {
+        if (parent.status !== RemoteDataState.Loading) {
+          parent.status = RemoteDataState.Loading
+          on.fire('status', parent.variable, parent.status)
+        }
+      })
+  }
+
   const descendants = collectDescendants(node)
-  const assignments = descendants.map(node => asAssignment(node.variable))
+  const assignments = descendants
+    .map(node => asAssignment(node.variable))
+    .filter(v => !!v)
 
   const {url, orgID} = options
   const {query} = node.variable.arguments.values
   const fetcher = options.fetcher || valueFetcher
 
-  const request = fetcher.fetch(url, orgID, query, assignments, null, '')
+  const request = fetcher.fetch(
+    url,
+    orgID,
+    query,
+    assignments,
+    null,
+    '',
+    options.skipCache
+  )
 
   node.cancel = request.cancel
 
   const values = await request.promise
 
+  // NOTE: do not fire `done` event here, as the value
+  // has not been properly hydrated yet
+  node.status = RemoteDataState.Done
   return values
 }
 
@@ -225,17 +386,13 @@ const hydrateVarsHelper = async (
   resolved (successfully or not).
 */
 const readyToResolve = (parent: VariableNode): boolean =>
-  parent.status === RemoteDataState.NotStarted &&
   parent.children.every(child => child.status === RemoteDataState.Done)
 
 /*
   Find all `NotStarted` nodes in the graph that have no children.
 */
 const findLeaves = (graph: VariableNode[]): VariableNode[] =>
-  graph.filter(
-    node =>
-      node.children.length === 0 && node.status === RemoteDataState.NotStarted
-  )
+  graph.filter(node => node.children.length === 0)
 
 /*
   Given a node, attempt to find a cycle that the node is a part of. If no cycle
@@ -243,7 +400,7 @@ const findLeaves = (graph: VariableNode[]): VariableNode[] =>
 */
 const findCyclicPath = (node: VariableNode): VariableNode[] => {
   try {
-    findCyclicPathHelper(node, [])
+    findCyclicPathHelper(node, [], {})
   } catch (cyclicPath) {
     return cyclicPath
   }
@@ -253,14 +410,18 @@ const findCyclicPath = (node: VariableNode): VariableNode[] => {
 
 const findCyclicPathHelper = (
   node: VariableNode,
-  seen: VariableNode[]
+  seen: VariableNode[],
+  cache: {[key: string]: undefined | boolean} = {}
 ): void => {
-  if (seen.includes(node)) {
+  if (cache[node.variable.id]) {
     throw seen
   }
 
   for (const child of node.children) {
-    findCyclicPathHelper(child, [...seen, node])
+    findCyclicPathHelper(child, [...seen, node], {
+      ...cache,
+      [node.variable.id]: true,
+    })
   }
 }
 
@@ -288,10 +449,13 @@ const invalidateAncestors = (node: VariableNode): void => {
 
   for (const ancestor of ancestors) {
     ancestor.status = RemoteDataState.Error
+    if (ancestor.variable.arguments.type === 'query') {
+      ancestor.variable.arguments.values.results = []
+    }
   }
 }
 
-const extractResult = (graph: VariableNode[]): VariableValuesByID => {
+const extractResult = (graph: VariableNode[]): Variable[] => {
   const result = {}
 
   for (const node of graph) {
@@ -299,10 +463,10 @@ const extractResult = (graph: VariableNode[]): VariableValuesByID => {
       node.values = errorVariableValues()
     }
 
-    result[node.variable.id] = node.values
+    result[node.variable.id] = node.variable
   }
 
-  return result
+  return Object.values(result)
 }
 
 /*
@@ -348,9 +512,16 @@ export const hydrateVars = (
   variables: Variable[],
   allVariables: Variable[],
   options: HydrateVarsOptions
-): CancelBox<VariableValuesByID> => {
-  const graph = findSubgraph(createVariableGraph(allVariables), variables)
+): EventedCancelBox<Variable[]> => {
+  let findSubgraphFunction = findSubgraph
+  if (isFlagEnabled('hydratevars')) {
+    findSubgraphFunction = findSubgraphFeature
+  }
 
+  const graph = findSubgraphFunction(
+    createVariableGraph(allVariables),
+    variables
+  ).filter(n => n.variable.arguments.type !== 'system')
   invalidateCycles(graph)
 
   let isCancelled = false
@@ -359,12 +530,42 @@ export const hydrateVars = (
     if (isCancelled) {
       return
     }
-
-    node.status === RemoteDataState.Loading
-
     try {
-      node.values = await hydrateVarsHelper(node, options)
-      node.status = RemoteDataState.Done
+      // TODO: terminate the concept of node.values at the fetcher and just use variables
+      node.values = await hydrateVarsHelper(node, options, on)
+
+      if (node.variable.arguments.type === 'query') {
+        node.variable.arguments.values.results = node.values.values as string[]
+      } else {
+        node.variable.arguments.values = node.values.values
+      }
+
+      node.variable.selected = node.variable.selected || []
+
+      // ensure that the selected value defaults propegate for
+      // nested queryies.
+      if (
+        node.variable.arguments.type === 'query' ||
+        node.variable.arguments.type === 'constant'
+      ) {
+        if (
+          !(node.values.values as string[]).includes(node.variable.selected[0])
+        ) {
+          node.variable.selected = []
+        }
+      } else if (node.variable.arguments.type === 'map') {
+        if (
+          !Object.keys(node.values.values).includes(node.variable.selected[0])
+        ) {
+          node.variable.selected = []
+        }
+      }
+
+      if (!node.variable.selected || !node.variable.selected[0]) {
+        node.variable.selected = node.values.selected
+      }
+
+      on.fire('status', node.variable, node.status)
 
       return Promise.all(node.parents.filter(readyToResolve).map(resolve))
     } catch (e) {
@@ -373,6 +574,7 @@ export const hydrateVars = (
       }
 
       node.status = RemoteDataState.Error
+      node.variable.arguments.values.results = []
 
       invalidateAncestors(node)
     }
@@ -386,9 +588,35 @@ export const hydrateVars = (
     deferred.reject(new CancellationError())
   }
 
-  Promise.all(findLeaves(graph).map(resolve)).then(() => {
-    deferred.resolve(extractResult(graph))
-  })
+  const on = (function() {
+    const callbacks = {}
+    const ret = (evt, cb) => {
+      if (!callbacks.hasOwnProperty(evt)) {
+        callbacks[evt] = []
+      }
 
-  return {promise: deferred.promise, cancel}
+      callbacks[evt].push(cb)
+    }
+
+    ret.fire = (evt, ...args) => {
+      if (!callbacks.hasOwnProperty(evt)) {
+        return
+      }
+
+      callbacks[evt].forEach(cb => cb.apply(cb, args))
+    }
+
+    return ret
+  })()
+
+  // NOTE: wrapping in a resolve disconnects the following findLeaves
+  // from the main execution thread, allowing external services to
+  // register listeners for the loading state changes
+  Promise.resolve()
+    .then(() => Promise.all(findLeaves(graph).map(resolve)))
+    .then(() => {
+      deferred.resolve(extractResult(graph))
+    })
+
+  return {promise: deferred.promise, cancel, on}
 }

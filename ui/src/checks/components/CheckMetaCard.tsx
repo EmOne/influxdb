@@ -1,6 +1,6 @@
 // Libraries
 import React, {FC} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import {Form, ComponentSize, ComponentColor, Grid} from '@influxdata/clockface'
@@ -22,22 +22,10 @@ import {CHECK_OFFSET_OPTIONS} from 'src/alerting/constants'
 import {DURATIONS} from 'src/timeMachine/constants/queryBuilder'
 
 // Types
-import {AppState, CheckTagSet} from 'src/types'
+import {AppState} from 'src/types'
 
-interface DispatchProps {
-  onSelectCheckEvery: typeof selectCheckEvery
-  onSetOffset: typeof setOffset
-  onRemoveTagSet: typeof removeTagSet
-  onEditTagSetByIndex: typeof editTagSetByIndex
-}
-
-interface StateProps {
-  tags: CheckTagSet[]
-  offset: string
-  every: string
-}
-
-type Props = DispatchProps & StateProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps
 
 const EMPTY_TAG_SET = {
   key: '',
@@ -68,6 +56,7 @@ const CheckMetaCard: FC<Props> = ({
                   value={every}
                   suggestions={DURATIONS}
                   onSubmit={onSelectCheckEvery}
+                  testID="schedule-check"
                 />
               </Form.Element>
             </Grid.Column>
@@ -77,6 +66,7 @@ const CheckMetaCard: FC<Props> = ({
                   value={offset}
                   suggestions={CHECK_OFFSET_OPTIONS}
                   onSubmit={onSetOffset}
+                  testID="offset-options"
                 />
               </Form.Element>
             </Grid.Column>
@@ -103,7 +93,7 @@ const CheckMetaCard: FC<Props> = ({
   )
 }
 
-const mstp = ({alertBuilder: {tags, offset, every}}: AppState): StateProps => {
+const mstp = ({alertBuilder: {tags, offset, every}}: AppState) => {
   return {
     tags: tags || [],
     offset,
@@ -111,14 +101,13 @@ const mstp = ({alertBuilder: {tags, offset, every}}: AppState): StateProps => {
   }
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onSelectCheckEvery: selectCheckEvery,
   onSetOffset: setOffset,
   onRemoveTagSet: removeTagSet,
   onEditTagSetByIndex: editTagSetByIndex,
 }
 
-export default connect<StateProps, DispatchProps, {}>(
-  mstp,
-  mdtp
-)(CheckMetaCard)
+const connector = connect(mstp, mdtp)
+
+export default connector(CheckMetaCard)

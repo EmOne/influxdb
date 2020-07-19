@@ -13,14 +13,15 @@ import (
 
 	"github.com/influxdata/flux/parser"
 	"github.com/influxdata/httprouter"
-	"github.com/influxdata/influxdb"
-	pcontext "github.com/influxdata/influxdb/context"
-	kithttp "github.com/influxdata/influxdb/kit/transport/http"
-	"github.com/influxdata/influxdb/mock"
-	"github.com/influxdata/influxdb/notification"
-	"github.com/influxdata/influxdb/notification/check"
-	"github.com/influxdata/influxdb/pkg/testttp"
-	influxTesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	pcontext "github.com/influxdata/influxdb/v2/context"
+	kithttp "github.com/influxdata/influxdb/v2/kit/transport/http"
+	"github.com/influxdata/influxdb/v2/mock"
+	"github.com/influxdata/influxdb/v2/notification"
+	"github.com/influxdata/influxdb/v2/notification/check"
+	"github.com/influxdata/influxdb/v2/pkg/testttp"
+	"github.com/influxdata/influxdb/v2/query/fluxlang"
+	influxTesting "github.com/influxdata/influxdb/v2/testing"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -34,6 +35,7 @@ func NewMockCheckBackend(t *testing.T) *CheckBackend {
 		LabelService:               mock.NewLabelService(),
 		UserService:                mock.NewUserService(),
 		OrganizationService:        mock.NewOrganizationService(),
+		FluxLanguageService:        fluxlang.DefaultService,
 	}
 }
 

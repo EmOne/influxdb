@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/storage/reads/datatypes"
-	"github.com/influxdata/influxdb/tsdb/cursors"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/models"
+	"github.com/influxdata/influxdb/v2/storage/reads/datatypes"
+	"github.com/influxdata/influxdb/v2/tsdb/cursors"
 )
 
 type groupResultSet struct {
@@ -57,7 +57,17 @@ func NewGroupResultSet(ctx context.Context, req *datatypes.ReadGroupRequest, new
 		o(g)
 	}
 
-	g.arrayCursors = newArrayCursors(ctx, req.Range.Start, req.Range.End, true)
+	g.arrayCursors = newArrayCursors(
+		ctx,
+		req.Range.Start,
+		req.Range.End,
+		// The following is an optimization where the selector `last`
+		// is implemented as a descending array cursor followed by a
+		// limit array cursor that selects only the first point, i.e
+		// the point with the largest timestamp, from the descending
+		// array cursor.
+		req.Aggregate == nil || req.Aggregate.Type != datatypes.AggregateTypeLast,
+	)
 
 	for i, k := range req.GroupKeys {
 		g.keys[i] = []byte(k)
@@ -247,7 +257,8 @@ func (g *groupResultSet) groupBySort() (int, error) {
 			nr.SortKey = make([]byte, 0, l)
 			for _, v := range vals {
 				nr.SortKey = append(nr.SortKey, v...)
-				nr.SortKey = append(nr.SortKey, ',')
+				// separate sort key values with ascii null character
+				nr.SortKey = append(nr.SortKey, '\000')
 			}
 
 			seriesRows = append(seriesRows, &nr)

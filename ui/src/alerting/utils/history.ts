@@ -7,6 +7,7 @@ import {runQuery, RunQueryResult} from 'src/shared/apis/query'
 import {parseSearchInput, searchExprToFlux} from 'src/eventViewer/utils/search'
 import {findNodes} from 'src/shared/utils/ast'
 import {readQueryParams} from 'src/shared/utils/queryParams'
+import {event} from 'src/cloud/utils/reporting'
 
 // Constants
 import {
@@ -36,13 +37,14 @@ export const loadStatuses = (
   orgID: string,
   {offset, limit, since, until, filter}: LoadRowsOptions
 ): CancelBox<StatusRow[]> => {
-  const start = since ? Math.round(since / 1000) : '-60d'
+  const start = since ? Math.round(since / 1000) : '-1d'
   const fluxFilter = filter ? searchExprToFlux(renameTagKeys(filter)) : null
 
   const query = `
 from(bucket: "${MONITORING_BUCKET}")
   |> range(start: ${start}, stop: ${Math.round(until / 1000)})
   |> filter(fn: (r) => r._measurement == "statuses" and r._field == "_message")
+  |> filter(fn: (r) => exists r._check_id and exists r._value and exists r._check_name and exists r._level)
   |> keep(columns: ["_time", "_value", "_check_id", "_check_name", "_level"])
   |> rename(columns: {"_time": "time",
                       "_value": "message",
@@ -54,6 +56,7 @@ from(bucket: "${MONITORING_BUCKET}")
   |> limit(n: ${limit}, offset: ${offset})
 `
 
+  event('runQuery', {context: 'alertHistory'})
   return processResponse(runQuery(orgID, query)) as CancelBox<StatusRow[]>
 }
 
@@ -69,6 +72,7 @@ from(bucket: "${MONITORING_BUCKET}")
   |> range(start: ${start}, stop: ${Math.round(until / 1000)})
   |> filter(fn: (r) => r._measurement == "notifications")
   |> filter(fn: (r) => r._field !~ /^_/)
+  |> filter(fn: (r) => exists r._check_id and exists r._check_name and exists r._notification_rule_id and exists r._notification_rule_name and exists r._notification_endpoint_id and exists r._notification_endpoint_name and exists r._level and exists r._sent)
   |> keep(columns: ["_time",
                     "_check_id",
                     "_check_name",
@@ -91,7 +95,7 @@ from(bucket: "${MONITORING_BUCKET}")
   |> sort(columns: ["time"], desc: true)
   |> limit(n: ${limit}, offset: ${offset})
 `
-
+  event('runQuery', {context: 'alertHistory'})
   return processResponse(runQuery(orgID, query)) as CancelBox<NotificationRow[]>
 }
 

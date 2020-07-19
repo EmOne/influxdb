@@ -26,7 +26,9 @@ const ClientGoOverlay: FunctionComponent<Props> = props => {
     name,
     url,
     initializeClientCodeSnippet,
-    writeDataCodeSnippet,
+    writingDataLineProtocolCodeSnippet,
+    writingDataPointCodeSnippet,
+    executeQueryCodeSnippet,
   } = clientGoLibrary
   const {org} = props
   const server = window.location.origin
@@ -44,37 +46,41 @@ const ClientGoOverlay: FunctionComponent<Props> = props => {
         template={initializeClientCodeSnippet}
         label="Go Code"
         defaults={{
-          token: 'myToken',
-          server: 'myHTTPInfluxAddress',
+          server: 'basepath',
+          token: 'token',
+          org: 'orgID',
+          bucket: 'bucketID',
         }}
         values={{
           server,
+          org,
         }}
       />
       <h5>Write Data</h5>
+      <p>Option 1: Use InfluxDB Line Protocol to write data</p>
       <TemplatedCodeSnippet
-        template={writeDataCodeSnippet}
+        template={writingDataLineProtocolCodeSnippet}
         label="Go Code"
-        defaults={{
-          bucket: 'my-awesome-bucket',
-          org: 'my-very-awesome-org',
-        }}
-        values={{
-          org,
-        }}
+      />
+      <p>Option 2: Use a Data Point to write data</p>
+      <TemplatedCodeSnippet
+        template={writingDataPointCodeSnippet}
+        label="Go Code"
+      />
+      <h5>Execute a Flux query</h5>
+      <TemplatedCodeSnippet
+        template={executeQueryCodeSnippet}
+        label="Go Code"
       />
     </ClientLibraryOverlay>
   )
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   return {
     org: getOrg(state).id,
   }
 }
 
 export {ClientGoOverlay}
-export default connect<StateProps, {}, Props>(
-  mstp,
-  null
-)(ClientGoOverlay)
+export default connect<StateProps, {}, Props>(mstp, null)(ClientGoOverlay)

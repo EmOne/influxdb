@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
-	"github.com/influxdata/influxdb/notification/endpoint"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
+	"github.com/influxdata/influxdb/v2/notification/endpoint"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,6 +75,8 @@ func NotificationEndpointService(
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt := tt
+			t.Parallel()
 			tt.fn(init, t)
 		})
 	}
@@ -2163,6 +2165,7 @@ func influxErrsEqual(t *testing.T, expected *influxdb.Error, actual error) {
 
 	if expected == nil {
 		require.NoError(t, actual)
+		return
 	}
 	iErr, ok := actual.(*influxdb.Error)
 	require.True(t, ok)

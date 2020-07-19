@@ -3,9 +3,9 @@ package tenant
 import (
 	"context"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 )
 
 // OrgClientService connects to Influx via HTTP using tokens to manage organizations
@@ -65,7 +65,7 @@ func (s *OrgClientService) FindOrganizations(ctx context.Context, filter influxd
 	span, _ := tracing.StartSpanFromContext(ctx)
 	defer span.Finish()
 
-	params := findOptionParams(opt...)
+	params := influxdb.FindOptionParams(opt...)
 	if filter.Name != nil {
 		span.LogKV("org", *filter.Name)
 		params = append(params, [2]string{"org", *filter.Name})

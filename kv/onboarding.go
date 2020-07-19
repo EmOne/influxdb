@@ -2,10 +2,11 @@ package kv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 )
 
 var (
@@ -14,11 +15,6 @@ var (
 )
 
 var _ influxdb.OnboardingService = (*Service)(nil)
-
-func (s *Service) initializeOnboarding(ctx context.Context, tx Tx) error {
-	_, err := tx.Bucket(onboardingBucket)
-	return err
-}
 
 // IsOnboarding means if the initial setup of influxdb has happened.
 // true means that the onboarding setup has not yet happened.
@@ -170,4 +166,8 @@ func (s *Service) OnboardInitialUser(ctx context.Context, req *influxdb.Onboardi
 		Bucket: bucket,
 		Auth:   auth,
 	}, nil
+}
+
+func (s *Service) OnboardUser(ctx context.Context, req *influxdb.OnboardingRequest) (*influxdb.OnboardingResults, error) {
+	return nil, errors.New("not yet implemented")
 }

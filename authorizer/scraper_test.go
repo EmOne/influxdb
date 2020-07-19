@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/authorizer"
-	influxdbcontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/mock"
-	influxdbtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/authorizer"
+	influxdbcontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/mock"
+	influxdbtesting "github.com/influxdata/influxdb/v2/testing"
 )
 
 var scraperCmpOptions = cmp.Options{
@@ -107,7 +107,7 @@ func TestScraperTargetStoreService_GetTargetByID(t *testing.T) {
 			s := authorizer.NewScraperTargetStoreService(tt.fields.ScraperTargetStoreService, mock.NewUserResourceMappingService(), mock.NewOrganizationService())
 
 			ctx := context.Background()
-			ctx = influxdbcontext.SetAuthorizer(ctx, &Authorizer{[]influxdb.Permission{tt.args.permission}})
+			ctx = influxdbcontext.SetAuthorizer(ctx, mock.NewMockAuthorizer(false, []influxdb.Permission{tt.args.permission}))
 
 			_, err := s.GetTargetByID(ctx, tt.args.id)
 			influxdbtesting.ErrorsEqual(t, err, tt.wants.err)
@@ -232,7 +232,7 @@ func TestScraperTargetStoreService_ListTargets(t *testing.T) {
 				mock.NewOrganizationService())
 
 			ctx := context.Background()
-			ctx = influxdbcontext.SetAuthorizer(ctx, &Authorizer{[]influxdb.Permission{tt.args.permission}})
+			ctx = influxdbcontext.SetAuthorizer(ctx, mock.NewMockAuthorizer(false, []influxdb.Permission{tt.args.permission}))
 
 			ts, err := s.ListTargets(ctx, influxdb.ScraperTargetFilter{})
 			influxdbtesting.ErrorsEqual(t, err, tt.wants.err)
@@ -402,7 +402,7 @@ func TestScraperTargetStoreService_UpdateTarget(t *testing.T) {
 				mock.NewOrganizationService())
 
 			ctx := context.Background()
-			ctx = influxdbcontext.SetAuthorizer(ctx, &Authorizer{tt.args.permissions})
+			ctx = influxdbcontext.SetAuthorizer(ctx, mock.NewMockAuthorizer(false, tt.args.permissions))
 
 			_, err := s.UpdateTarget(ctx, &influxdb.ScraperTarget{ID: tt.args.id, BucketID: tt.args.bucketID}, influxdb.ID(1))
 			influxdbtesting.ErrorsEqual(t, err, tt.wants.err)
@@ -508,7 +508,7 @@ func TestScraperTargetStoreService_RemoveTarget(t *testing.T) {
 				mock.NewOrganizationService())
 
 			ctx := context.Background()
-			ctx = influxdbcontext.SetAuthorizer(ctx, &Authorizer{tt.args.permissions})
+			ctx = influxdbcontext.SetAuthorizer(ctx, mock.NewMockAuthorizer(false, tt.args.permissions))
 
 			err := s.RemoveTarget(ctx, tt.args.id)
 			influxdbtesting.ErrorsEqual(t, err, tt.wants.err)
@@ -648,7 +648,7 @@ func TestScraperTargetStoreService_AddTarget(t *testing.T) {
 				mock.NewOrganizationService())
 
 			ctx := context.Background()
-			ctx = influxdbcontext.SetAuthorizer(ctx, &Authorizer{tt.args.permissions})
+			ctx = influxdbcontext.SetAuthorizer(ctx, mock.NewMockAuthorizer(false, tt.args.permissions))
 
 			err := s.AddTarget(ctx, &influxdb.ScraperTarget{OrgID: tt.args.orgID, BucketID: tt.args.bucketID}, influxdb.ID(1))
 			influxdbtesting.ErrorsEqual(t, err, tt.wants.err)

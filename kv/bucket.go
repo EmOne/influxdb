@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/influxdata/influxdb"
-	icontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/resource"
+	"github.com/influxdata/influxdb/v2"
+	icontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/resource"
 )
 
 var (
@@ -19,16 +19,6 @@ var (
 
 var _ influxdb.BucketService = (*Service)(nil)
 var _ influxdb.BucketOperationLogService = (*Service)(nil)
-
-func (s *Service) initializeBuckets(ctx context.Context, tx Tx) error {
-	if _, err := s.bucketsBucket(tx); err != nil {
-		return err
-	}
-	if _, err := s.bucketsIndexBucket(tx); err != nil {
-		return err
-	}
-	return nil
-}
 
 func (s *Service) bucketsBucket(tx Tx) (Bucket, error) {
 	b, err := tx.Bucket(bucketBucket)

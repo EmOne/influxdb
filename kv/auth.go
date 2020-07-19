@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/buger/jsonparser"
-	influxdb "github.com/influxdata/influxdb"
-	jsonp "github.com/influxdata/influxdb/pkg/jsonparser"
+	influxdb "github.com/influxdata/influxdb/v2"
+	jsonp "github.com/influxdata/influxdb/v2/pkg/jsonparser"
 )
 
 var (
@@ -16,16 +16,6 @@ var (
 )
 
 var _ influxdb.AuthorizationService = (*Service)(nil)
-
-func (s *Service) initializeAuths(ctx context.Context, tx Tx) error {
-	if _, err := tx.Bucket(authBucket); err != nil {
-		return err
-	}
-	if _, err := authIndexBucket(tx); err != nil {
-		return err
-	}
-	return nil
-}
 
 // FindAuthorizationByID retrieves a authorization by id.
 func (s *Service) FindAuthorizationByID(ctx context.Context, id influxdb.ID) (*influxdb.Authorization, error) {

@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	platform "github.com/influxdata/influxdb"
+	platform "github.com/influxdata/influxdb/v2"
 )
 
 var (
@@ -96,16 +96,6 @@ func encodeKeyValueIndexKey(k []byte) []byte {
 	h := sha1.New()
 	h.Write([]byte(k))
 	return h.Sum(nil)
-}
-
-func (s *Service) initializeKVLog(ctx context.Context, tx Tx) error {
-	if _, err := tx.Bucket(kvlogBucket); err != nil {
-		return err
-	}
-	if _, err := tx.Bucket(kvlogIndex); err != nil {
-		return err
-	}
-	return nil
 }
 
 var errKeyValueLogBoundsNotFound = &platform.Error{

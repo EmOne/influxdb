@@ -9,8 +9,8 @@ import (
 	"path"
 
 	"github.com/influxdata/httprouter"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 	"go.uber.org/zap"
 )
 
@@ -45,6 +45,10 @@ func NewLabelHandler(log *zap.Logger, s influxdb.LabelService, he influxdb.HTTPE
 	h.HandlerFunc("DELETE", labelsIDPath, h.handleDeleteLabel)
 
 	return h
+}
+
+func (h *LabelHandler) Prefix() string {
+	return prefixLabels
 }
 
 // handlePostLabel is the HTTP handler for the POST /api/v2/labels route.
@@ -311,7 +315,7 @@ type labelsResponse struct {
 func newLabelsResponse(ls []*influxdb.Label) *labelsResponse {
 	return &labelsResponse{
 		Links: map[string]string{
-			"self": fmt.Sprintf("/api/v2/labels"),
+			"self": "/api/v2/labels",
 		},
 		Labels: ls,
 	}
@@ -541,7 +545,7 @@ func (s *LabelService) FindLabelByID(ctx context.Context, id influxdb.ID) (*infl
 
 // FindLabels is a client for the find labels response from the server.
 func (s *LabelService) FindLabels(ctx context.Context, filter influxdb.LabelFilter, opt ...influxdb.FindOptions) ([]*influxdb.Label, error) {
-	params := findOptionParams(opt...)
+	params := influxdb.FindOptionParams(opt...)
 	if filter.OrgID != nil {
 		params = append(params, [2]string{"orgID", filter.OrgID.String()})
 	}

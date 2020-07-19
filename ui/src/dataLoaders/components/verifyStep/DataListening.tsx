@@ -1,7 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {withRouter, WithRouterProps} from 'react-router'
-import _ from 'lodash'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
 
 // Apis
 import {runQuery} from 'src/shared/apis/query'
@@ -33,8 +32,10 @@ const FETCH_WAIT = 5000
 const SECONDS = 60
 const TIMER_WAIT = 1000
 
+type Props = RouteComponentProps<{orgID: string}> & OwnProps
+
 @ErrorHandling
-class DataListening extends PureComponent<OwnProps & WithRouterProps, State> {
+class DataListening extends PureComponent<Props, State> {
   private intervalID: NodeJS.Timer
   private startTime: number
   private timer: NodeJS.Timer
@@ -112,7 +113,9 @@ class DataListening extends PureComponent<OwnProps & WithRouterProps, State> {
   private checkForData = async (): Promise<void> => {
     const {
       bucket,
-      params: {orgID},
+      match: {
+        params: {orgID},
+      },
     } = this.props
     const {secondsLeft} = this.state
     const script = `from(bucket: "${bucket}")

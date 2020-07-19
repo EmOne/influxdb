@@ -1,12 +1,11 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 import _ from 'lodash'
 
 // Components
-import {Form} from '@influxdata/clockface'
+import {Form, DapperScrollbars} from '@influxdata/clockface'
 import ConfigFieldHandler from 'src/dataLoaders/components/collectorsWizard/configure/ConfigFieldHandler'
-import FancyScrollbar from 'src/shared/components/fancy_scrollbar/FancyScrollbar'
 
 // Actions
 import {
@@ -24,23 +23,15 @@ interface OwnProps {
   configFields: ConfigFields
 }
 
-interface DispatchProps {
-  onSetActiveTelegrafPlugin: typeof setActiveTelegrafPlugin
-  onSetPluginConfiguration: typeof setPluginConfiguration
-}
-
-interface StateProps {
-  telegrafPlugins: TelegrafPlugin[]
-}
-
-type Props = OwnProps & StateProps & DispatchProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = OwnProps & ReduxProps
 
 export class PluginConfigForm extends PureComponent<Props> {
   public render() {
     const {configFields, telegrafPlugin} = this.props
     return (
       <Form onSubmit={this.handleSubmitForm} className="data-loading--form">
-        <FancyScrollbar
+        <DapperScrollbars
           autoHide={false}
           className="data-loading--scroll-content"
         >
@@ -53,9 +44,7 @@ export class PluginConfigForm extends PureComponent<Props> {
               <a
                 target="_blank"
                 data-testid="docs-link"
-                href={`https://github.com/influxdata/telegraf/tree/master/plugins/inputs/${
-                  telegrafPlugin.name
-                }`}
+                href={`https://github.com/influxdata/telegraf/tree/master/plugins/inputs/${telegrafPlugin.name}`}
               >
                 Documentation
               </a>
@@ -65,7 +54,7 @@ export class PluginConfigForm extends PureComponent<Props> {
             configFields={configFields}
             telegrafPlugin={telegrafPlugin}
           />
-        </FancyScrollbar>
+        </DapperScrollbars>
         <OnboardingButtons
           autoFocusNext={this.autoFocus}
           nextButtonText="Done"
@@ -90,6 +79,7 @@ export class PluginConfigForm extends PureComponent<Props> {
     const activeTelegrafPlugin = telegrafPlugins.find(tp => tp.active)
     if (!!activeTelegrafPlugin) {
       if (!activeTelegrafPlugin.hasOwnProperty('plugin')) {
+        onSetActiveTelegrafPlugin('')
         return
       }
       onSetPluginConfiguration(activeTelegrafPlugin.name)
@@ -103,16 +93,15 @@ const mstp = ({
   dataLoading: {
     dataLoaders: {telegrafPlugins},
   },
-}: AppState): StateProps => ({
+}: AppState) => ({
   telegrafPlugins,
 })
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onSetActiveTelegrafPlugin: setActiveTelegrafPlugin,
   onSetPluginConfiguration: setPluginConfiguration,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(PluginConfigForm)
+const connector = connect(mstp, mdtp)
+
+export default connector(PluginConfigForm)

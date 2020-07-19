@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	influxdb "github.com/influxdata/influxdb"
+	influxdb "github.com/influxdata/influxdb/v2"
 )
 
 var (
@@ -34,25 +34,6 @@ func init() {
 	if err := DefaultSource.OrganizationID.DecodeFromString(DefaultSourceOrganizationID); err != nil {
 		panic(fmt.Sprintf("failed to decode default source organization id: %v", err))
 	}
-}
-
-func (s *Service) initializeSources(ctx context.Context, tx Tx) error {
-	if _, err := tx.Bucket(sourceBucket); err != nil {
-		return err
-	}
-
-	_, pe := s.findSourceByID(ctx, tx, DefaultSource.ID)
-	if pe != nil && influxdb.ErrorCode(pe) != influxdb.ENotFound {
-		return pe
-	}
-
-	if influxdb.ErrorCode(pe) == influxdb.ENotFound {
-		if err := s.putSource(ctx, tx, &DefaultSource); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // DefaultSource retrieves the default source.

@@ -1,6 +1,6 @@
 // Libraries
 import React, {FunctionComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Actions
 import {executeQueries} from 'src/timeMachine/actions/queries'
@@ -9,26 +9,16 @@ import {executeQueries} from 'src/timeMachine/actions/queries'
 import {Form} from '@influxdata/clockface'
 import VariableDropdown from 'src/variables/components/VariableDropdown'
 
-// Types
-import {AppState} from 'src/types'
-
-interface StateProps {
-  timeMachineID: string
-}
-
-interface DispatchProps {
-  execute: typeof executeQueries
-}
-
 interface OwnProps {
   variableID: string
 }
 
-type Props = StateProps & DispatchProps & OwnProps
+type ReduxProps = ConnectedProps<typeof connector>
+
+type Props = ReduxProps & OwnProps
 
 const VariableTooltipContents: FunctionComponent<Props> = ({
   variableID,
-  timeMachineID,
   execute,
 }) => {
   const refresh = () => {
@@ -42,7 +32,6 @@ const VariableTooltipContents: FunctionComponent<Props> = ({
       <Form.Element label="Value">
         <VariableDropdown
           variableID={variableID}
-          contextID={timeMachineID}
           onSelect={refresh}
           testID="variable--tooltip-dropdown"
         />
@@ -51,20 +40,10 @@ const VariableTooltipContents: FunctionComponent<Props> = ({
   )
 }
 
-const mstp = (state: AppState) => {
-  const contextID =
-    state.currentDashboard.id || state.timeMachines.activeTimeMachineID
-
-  return {
-    timeMachineID: contextID,
-  }
-}
-
 const mdtp = {
   execute: executeQueries,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(VariableTooltipContents)
+const connector = connect(null, mdtp)
+
+export default connector(VariableTooltipContents)

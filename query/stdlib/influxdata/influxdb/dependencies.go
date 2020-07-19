@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/influxdata/flux"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/prom"
-	"github.com/influxdata/influxdb/query"
-	"github.com/influxdata/influxdb/storage"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/prom"
+	"github.com/influxdata/influxdb/v2/query"
+	"github.com/influxdata/influxdb/v2/storage"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -26,6 +26,9 @@ func (d StorageDependencies) Inject(ctx context.Context) context.Context {
 }
 
 func GetStorageDependencies(ctx context.Context) StorageDependencies {
+	if ctx.Value(dependenciesKey) == nil {
+		return StorageDependencies{}
+	}
 	return ctx.Value(dependenciesKey).(StorageDependencies)
 }
 
@@ -65,7 +68,7 @@ func (d Dependencies) PrometheusCollectors() []prometheus.Collector {
 }
 
 func NewDependencies(
-	reader Reader,
+	reader query.StorageReader,
 	writer storage.PointsWriter,
 	bucketSvc influxdb.BucketService,
 	orgSvc influxdb.OrganizationService,

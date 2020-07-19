@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	kithttp "github.com/influxdata/influxdb/kit/transport/http"
+	kithttp "github.com/influxdata/influxdb/v2/kit/transport/http"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -174,7 +174,7 @@ func TestRouter_Panic(t *testing.T) {
 				body: `
 {
   "code": "internal error",
-  "message": "a panic has occurred: not implemented"
+  "message": "a panic has occurred: /ping: not implemented"
 }`,
 			},
 		},

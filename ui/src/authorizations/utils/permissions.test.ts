@@ -62,6 +62,20 @@ const hvhs: Permission[] = [
     action: 'read',
     resource: {
       orgID: 'bulldogs',
+      type: 'dbrp',
+    },
+  },
+  {
+    action: 'write',
+    resource: {
+      orgID: 'bulldogs',
+      type: 'dbrp',
+    },
+  },
+  {
+    action: 'read',
+    resource: {
+      orgID: 'bulldogs',
       type: 'documents',
     },
   },
@@ -194,14 +208,14 @@ const hvhs: Permission[] = [
   {
     action: 'read',
     resource: {
-      orgID: 'bulldogs',
+      id: 'mario',
       type: 'users',
     },
   },
   {
     action: 'write',
     resource: {
-      orgID: 'bulldogs',
+      id: 'mario',
       type: 'users',
     },
   },
@@ -236,5 +250,5 @@ const hvhs: Permission[] = [
 ]
 
 test('all-access tokens/authorizations production test', () => {
-  expect(allAccessPermissions('bulldogs')).toMatchObject(hvhs)
+  expect(allAccessPermissions('bulldogs', 'mario')).toMatchObject(hvhs)
 })

@@ -1,6 +1,7 @@
 // Utils
 import {runQuery} from 'src/shared/apis/query'
 import {fromFlux} from '@influxdata/giraffe'
+import {event} from 'src/cloud/utils/reporting'
 
 // Constants
 import {MONITORING_BUCKET} from 'src/alerting/constants'
@@ -19,19 +20,19 @@ export const runStatusesQuery = (
 from(bucket: "${MONITORING_BUCKET}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "statuses" and r._field == "_message")
-  |> filter(fn: (r) => exists r._check_id)
-  |> filter(fn: (r) => exists r._check_name)
-  |> filter(fn: (r) => exists r._level)
+  |> filter(fn: (r) => r._check_id == "${checkID}")
+  |> filter(fn: (r) => exists r._value and exists r._check_id and exists r._check_name and exists r._level)
   |> keep(columns: ["_time", "_value", "_check_id", "_check_name", "_level"])
   |> window(every: 1s, timeColumn: "_time", startColumn: "_start", stopColumn: "_stop")
   |> group(columns: ["_start", "_stop"])
-  |> filter(fn: (r) => r["_check_id"] == "${checkID}")
   |> rename(columns: {"_time": "time",
                       "_value": "message",
                       "_check_id": "checkID",
                       "_check_name": "checkName",
                       "_level": "level"})
 `
+
+  event('runQuery', {context: 'checkStatuses'})
   return processStatusesResponse(runQuery(orgID, query, extern)) as CancelBox<
     StatusRow[][]
   >

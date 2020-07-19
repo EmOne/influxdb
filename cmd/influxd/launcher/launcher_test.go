@@ -7,17 +7,17 @@ import (
 	nethttp "net/http"
 	"testing"
 
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/cmd/influxd/launcher"
-	"github.com/influxdata/influxdb/http"
-	_ "github.com/influxdata/influxdb/query/builtin"
+	platform "github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/cmd/influxd/launcher"
+	"github.com/influxdata/influxdb/v2/http"
+	_ "github.com/influxdata/influxdb/v2/query/builtin"
 )
 
 // Default context.
 var ctx = context.Background()
 
 func TestLauncher_Setup(t *testing.T) {
-	l := launcher.NewTestLauncher()
+	l := launcher.NewTestLauncher(nil)
 	if err := l.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestLauncher_Setup(t *testing.T) {
 // This is to mimic chronograf using cookies as sessions
 // rather than authorizations
 func TestLauncher_SetupWithUsers(t *testing.T) {
-	l := launcher.RunTestLauncherOrFail(t, ctx)
+	l := launcher.RunTestLauncherOrFail(t, ctx, nil)
 	l.SetupOrFail(t)
 	defer l.ShutdownOrFail(t, ctx)
 

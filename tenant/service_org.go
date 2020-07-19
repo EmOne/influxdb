@@ -3,9 +3,9 @@ package tenant
 import (
 	"context"
 
-	"github.com/influxdata/influxdb"
-	icontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2"
+	icontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/kv"
 )
 
 // Returns a single organization by ID.
@@ -67,6 +67,28 @@ func (s *Service) FindOrganizations(ctx context.Context, filter influxdb.Organiz
 	}
 
 	var orgs []*influxdb.Organization
+
+	if filter.UserID != nil {
+		// find urms for orgs with this user
+		urms, _, err := s.FindUserResourceMappings(ctx, influxdb.UserResourceMappingFilter{
+			UserID:       *filter.UserID,
+			ResourceType: influxdb.OrgsResourceType,
+		}, opt...)
+		if err != nil {
+			return nil, 0, err
+		}
+		// find orgs by the urm's resource ids.
+		for _, urm := range urms {
+			o, err := s.FindOrganizationByID(ctx, urm.ResourceID)
+			if err == nil {
+				// if there is an error then this is a crufty urm and we should just move on
+				orgs = append(orgs, o)
+			}
+		}
+
+		return orgs, len(orgs), nil
+	}
+
 	err := s.store.View(ctx, func(tx kv.Tx) error {
 		os, err := s.store.ListOrgs(ctx, tx, opt...)
 		if err != nil {
@@ -129,28 +151,6 @@ func (s *Service) CreateOrganization(ctx context.Context, o *influxdb.Organizati
 			if err != nil {
 				return err
 			}
-			err = s.store.CreateURM(ctx, tx, &influxdb.UserResourceMapping{
-				UserID:       userID,
-				UserType:     influxdb.Owner,
-				MappingType:  influxdb.UserMappingType,
-				ResourceType: influxdb.BucketsResourceType,
-				ResourceID:   tb.ID,
-			})
-			if err != nil {
-				return err
-			}
-			err = s.store.CreateURM(ctx, tx, &influxdb.UserResourceMapping{
-				UserID:       userID,
-				UserType:     influxdb.Owner,
-				MappingType:  influxdb.UserMappingType,
-				ResourceType: influxdb.BucketsResourceType,
-				ResourceID:   mb.ID,
-			})
-
-			if err != nil {
-				return err
-			}
-
 		}
 		return nil
 	})
@@ -175,7 +175,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, id influxdb.ID, upd in
 	return org, nil
 }
 
-// Removes a organization by ID.
+// DeleteOrganization removes a organization by ID and its dependent resources.
 func (s *Service) DeleteOrganization(ctx context.Context, id influxdb.ID) error {
 	err := s.store.Update(ctx, func(tx kv.Tx) error {
 		// clean up the buckets for this organization

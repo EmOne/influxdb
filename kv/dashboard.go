@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	influxdb "github.com/influxdata/influxdb"
-	icontext "github.com/influxdata/influxdb/context"
+	influxdb "github.com/influxdata/influxdb/v2"
+	icontext "github.com/influxdata/influxdb/v2/context"
 )
 
 var (
@@ -32,19 +32,6 @@ const (
 
 var _ influxdb.DashboardService = (*Service)(nil)
 var _ influxdb.DashboardOperationLogService = (*Service)(nil)
-
-func (s *Service) initializeDashboards(ctx context.Context, tx Tx) error {
-	if _, err := tx.Bucket(dashboardBucket); err != nil {
-		return err
-	}
-	if _, err := tx.Bucket(orgDashboardIndex); err != nil {
-		return err
-	}
-	if _, err := tx.Bucket(dashboardCellViewBucket); err != nil {
-		return err
-	}
-	return nil
-}
 
 // FindDashboardByID retrieves a dashboard by id.
 func (s *Service) FindDashboardByID(ctx context.Context, id influxdb.ID) (*influxdb.Dashboard, error) {
@@ -239,14 +226,6 @@ func decodeOrgDashboardIndexKey(indexKey []byte) (orgID influxdb.ID, dashID infl
 func (s *Service) findDashboards(ctx context.Context, tx Tx, filter influxdb.DashboardFilter, opts ...influxdb.FindOptions) ([]*influxdb.Dashboard, error) {
 	if filter.OrganizationID != nil {
 		return s.findOrganizationDashboards(ctx, tx, *filter.OrganizationID)
-	}
-
-	if filter.Organization != nil {
-		o, err := s.findOrganizationByName(ctx, tx, *filter.Organization)
-		if err != nil {
-			return nil, err
-		}
-		return s.findOrganizationDashboards(ctx, tx, o.ID)
 	}
 
 	var offset, limit, count int
@@ -660,7 +639,7 @@ func (s *Service) UpdateDashboardCell(ctx context.Context, dashboardID, cellID i
 func (s *Service) PutDashboard(ctx context.Context, d *influxdb.Dashboard) error {
 	return s.kv.Update(ctx, func(tx Tx) error {
 		for _, cell := range d.Cells {
-			if err := s.createCellView(ctx, tx, d.ID, cell.ID, nil); err != nil {
+			if err := s.createCellView(ctx, tx, d.ID, cell.ID, cell.View); err != nil {
 				return err
 			}
 		}
@@ -818,6 +797,22 @@ func (s *Service) updateDashboard(ctx context.Context, tx Tx, id influxdb.ID, up
 		return nil, err
 	}
 
+	if upd.Cells != nil {
+		for _, c := range *upd.Cells {
+			if !c.ID.Valid() {
+				c.ID = s.IDGenerator.ID()
+				if c.View != nil {
+					c.View.ViewContents.ID = c.ID
+				}
+			}
+		}
+		for _, c := range d.Cells {
+			if err := s.deleteDashboardCellView(ctx, tx, d.ID, c.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if err := upd.Apply(d); err != nil {
 		return nil, err
 	}
@@ -828,6 +823,14 @@ func (s *Service) updateDashboard(ctx context.Context, tx Tx, id influxdb.ID, up
 
 	if err := s.putDashboardWithMeta(ctx, tx, d); err != nil {
 		return nil, err
+	}
+
+	if upd.Cells != nil {
+		for _, c := range d.Cells {
+			if err := s.putDashboardCellView(ctx, tx, d.ID, c.ID, c.View); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return d, nil

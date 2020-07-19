@@ -7,9 +7,9 @@ import (
 	"regexp"
 
 	"github.com/BurntSushi/toml"
-	"github.com/influxdata/influxdb/telegraf/plugins"
-	"github.com/influxdata/influxdb/telegraf/plugins/inputs"
-	"github.com/influxdata/influxdb/telegraf/plugins/outputs"
+	"github.com/influxdata/influxdb/v2/telegraf/plugins"
+	"github.com/influxdata/influxdb/v2/telegraf/plugins/inputs"
+	"github.com/influxdata/influxdb/v2/telegraf/plugins/outputs"
 )
 
 const (
@@ -82,11 +82,7 @@ func (tc *TelegrafConfig) CountPlugins() map[string]float64 {
 		if len(v) < 2 {
 			continue
 		}
-		if _, ok := plugins[v[1]]; ok {
-			plugins[v[1]]++
-		} else {
-			plugins[v[1]] = 1
-		}
+		plugins[v[1]]++
 	}
 
 	return plugins
@@ -146,13 +142,6 @@ func (tc *TelegrafConfig) UnmarshalJSON(b []byte) error {
 		}
 
 		tc.Metadata = m
-	}
-
-	if tc.Config == "" {
-		return &Error{
-			Code: EEmptyValue,
-			Msg:  "no config provided",
-		}
 	}
 
 	return nil

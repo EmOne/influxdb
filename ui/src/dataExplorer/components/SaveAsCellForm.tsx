@@ -1,20 +1,19 @@
 // Libraries
 import React, {PureComponent, ChangeEvent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 import {get, isEmpty} from 'lodash'
 
 // Selectors
 import {getSaveableView} from 'src/timeMachine/selectors'
 import {getOrg} from 'src/organizations/selectors'
 import {getAll} from 'src/resources/selectors'
+import {sortDashboardByName} from 'src/dashboards/selectors'
 
 // Components
 import {Form, Input, Button, Grid} from '@influxdata/clockface'
 import {ErrorHandling} from 'src/shared/decorators/errors'
 import DashboardsDropdown from 'src/dataExplorer/components/DashboardsDropdown'
 
-// Constants
-import {cellAddFailed, cellAdded} from 'src/shared/copy/notifications'
 import {
   DashboardTemplate,
   DEFAULT_DASHBOARD_NAME,
@@ -46,24 +45,12 @@ interface State {
   newDashboardName: string
 }
 
-interface StateProps {
-  dashboards: Dashboard[]
-  view: View
-  orgID: string
-}
-
-interface DispatchProps {
-  onGetDashboards: typeof getDashboards
-  onCreateCellWithView: typeof createCellWithView
-  onCreateDashboardWithView: typeof createDashboardWithView
-  notify: typeof notify
-}
-
 interface OwnProps {
   dismiss: () => void
 }
 
-type Props = StateProps & DispatchProps & OwnProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps & OwnProps
 
 @ErrorHandling
 class SaveAsCellForm extends PureComponent<Props, State> {
@@ -173,7 +160,6 @@ class SaveAsCellForm extends PureComponent<Props, State> {
       dashboards,
       view,
       dismiss,
-      notify,
       orgID,
     } = this.props
     const {targetDashboardIDs} = this.state
@@ -186,21 +172,16 @@ class SaveAsCellForm extends PureComponent<Props, State> {
 
     try {
       targetDashboardIDs.forEach(dashID => {
-        let targetDashboardName = ''
-        try {
-          if (dashID === DashboardTemplate.id) {
-            targetDashboardName = newDashboardName || DEFAULT_DASHBOARD_NAME
-            onCreateDashboardWithView(orgID, newDashboardName, viewWithProps)
-          } else {
-            const selectedDashboard = dashboards.find(d => d.id === dashID)
-            targetDashboardName = selectedDashboard.name
-            onCreateCellWithView(selectedDashboard.id, viewWithProps)
-          }
-          notify(cellAdded(cellName, targetDashboardName))
-        } catch {
-          notify(cellAddFailed(cellName, targetDashboardName))
+        if (dashID === DashboardTemplate.id) {
+          onCreateDashboardWithView(orgID, newDashboardName, viewWithProps)
+          return
         }
+
+        const selectedDashboard = dashboards.find(d => d.id === dashID)
+        onCreateCellWithView(selectedDashboard.id, viewWithProps)
       })
+    } catch (error) {
+      console.error(error)
     } finally {
       this.resetForm()
       dismiss()
@@ -237,22 +218,25 @@ class SaveAsCellForm extends PureComponent<Props, State> {
   }
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const view = getSaveableView(state)
   const org = getOrg(state)
   const dashboards = getAll<Dashboard>(state, ResourceType.Dashboards)
 
-  return {dashboards, view, orgID: get(org, 'id', '')}
+  return {
+    dashboards: sortDashboardByName(dashboards),
+    view,
+    orgID: get(org, 'id', ''),
+  }
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onGetDashboards: getDashboards,
   onCreateCellWithView: createCellWithView,
   onCreateDashboardWithView: createDashboardWithView,
   notify,
 }
 
-export default connect<StateProps, DispatchProps>(
-  mstp,
-  mdtp
-)(SaveAsCellForm)
+const connector = connect(mstp, mdtp)
+
+export default connector(SaveAsCellForm)

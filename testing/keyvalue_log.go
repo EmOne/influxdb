@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	platform "github.com/influxdata/influxdb"
+	platform "github.com/influxdata/influxdb/v2"
 )
 
 var keyValueLogCmpOptions = cmp.Options{
@@ -56,6 +56,8 @@ func KeyValueLog(
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt := tt
+			t.Parallel()
 			tt.fn(init, t)
 		})
 	}

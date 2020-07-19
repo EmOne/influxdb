@@ -1,9 +1,10 @@
 // Libraries
-import React, {FunctionComponent} from 'react'
+import React, {FunctionComponent, useState} from 'react'
 import {connect} from 'react-redux'
+import {Switch, Route} from 'react-router-dom'
 
 //Components
-import {Grid, GridRow, GridColumn, Page} from '@influxdata/clockface'
+import {Page, SelectGroup, ButtonShape} from '@influxdata/clockface'
 import ChecksColumn from 'src/checks/components/ChecksColumn'
 import RulesColumn from 'src/notifications/rules/components/RulesColumn'
 import EndpointsColumn from 'src/notifications/endpoints/components/EndpointsColumn'
@@ -11,6 +12,13 @@ import GetAssetLimits from 'src/cloud/components/GetAssetLimits'
 import AssetLimitAlert from 'src/cloud/components/AssetLimitAlert'
 import GetResources from 'src/resources/components/GetResources'
 import CloudUpgradeButton from 'src/shared/components/CloudUpgradeButton'
+import NewThresholdCheckEO from 'src/checks/components/NewThresholdCheckEO'
+import NewDeadmanCheckEO from 'src/checks/components/NewDeadmanCheckEO'
+import EditCheckEO from 'src/checks/components/EditCheckEO'
+import NewRuleOverlay from 'src/notifications/rules/components/NewRuleOverlay'
+import EditRuleOverlay from 'src/notifications/rules/components/EditRuleOverlay'
+import NewEndpointOverlay from 'src/notifications/endpoints/components/NewEndpointOverlay'
+import EditEndpointOverlay from 'src/notifications/endpoints/components/EditEndpointOverlay'
 
 // Utils
 import {pageTitleSuffixer} from 'src/shared/utils/pageTitles'
@@ -23,69 +31,132 @@ import {
 import {AppState, ResourceType} from 'src/types'
 import {LimitStatus} from 'src/cloud/actions/limits'
 
+const alertsPath = '/orgs/:orgID/alerting'
+
 interface StateProps {
   limitStatus: LimitStatus
   limitedResources: string
 }
 
+type ActiveColumn = 'checks' | 'endpoints' | 'rules'
+
 const AlertingIndex: FunctionComponent<StateProps> = ({
-  children,
   limitStatus,
   limitedResources,
 }) => {
+  const [activeColumn, setActiveColumn] = useState<ActiveColumn>('checks')
+
+  const pageContentsClassName = `alerting-index alerting-index__${activeColumn}`
+
+  const handleTabClick = (selectGroupOptionID: ActiveColumn): void => {
+    setActiveColumn(selectGroupOptionID)
+  }
+
   return (
     <>
       <Page titleTag={pageTitleSuffixer(['Alerts'])}>
-        <Page.Header fullWidth={false}>
+        <Page.Header fullWidth={true} testID="alerts-page--header">
           <Page.Title title="Alerts" />
           <CloudUpgradeButton />
         </Page.Header>
-        <Page.Contents fullWidth={false} scrollable={false}>
-          <GetResources resources={[ResourceType.Labels]}>
+        <Page.Contents
+          fullWidth={true}
+          scrollable={false}
+          className={pageContentsClassName}
+        >
+          <GetResources resources={[ResourceType.Labels, ResourceType.Buckets]}>
             <GetAssetLimits>
               <AssetLimitAlert
                 resourceName={limitedResources}
                 limitStatus={limitStatus}
                 className="load-data--asset-alert"
               />
-              <Grid className="alerting-index">
-                <GridRow testID="grid--row">
-                  <GridColumn widthLG={4} widthMD={4} widthSM={4} widthXS={12}>
-                    <GetResources resources={[ResourceType.Checks]}>
-                      <ChecksColumn />
-                    </GetResources>
-                  </GridColumn>
-                  <GridColumn widthLG={4} widthMD={4} widthSM={4} widthXS={12}>
-                    <GetResources
-                      resources={[ResourceType.NotificationEndpoints]}
-                    >
-                      <EndpointsColumn />
-                    </GetResources>
-                  </GridColumn>
-                  <GridColumn widthLG={4} widthMD={4} widthSM={4} widthXS={12}>
-                    <GetResources resources={[ResourceType.NotificationRules]}>
-                      <RulesColumn />
-                    </GetResources>
-                  </GridColumn>
-                </GridRow>
-              </Grid>
+              <SelectGroup
+                className="alerting-index--selector"
+                shape={ButtonShape.StretchToFit}
+              >
+                <SelectGroup.Option
+                  value="checks"
+                  id="checks"
+                  onClick={handleTabClick}
+                  name="alerting-active-tab"
+                  active={activeColumn === 'checks'}
+                  testID="alerting-tab--checks"
+                >
+                  Checks
+                </SelectGroup.Option>
+                <SelectGroup.Option
+                  value="endpoints"
+                  id="endpoints"
+                  onClick={handleTabClick}
+                  name="alerting-active-tab"
+                  active={activeColumn === 'endpoints'}
+                  testID="alerting-tab--endpoints"
+                >
+                  Notification Endpoints
+                </SelectGroup.Option>
+                <SelectGroup.Option
+                  value="rules"
+                  id="rules"
+                  onClick={handleTabClick}
+                  name="alerting-active-tab"
+                  active={activeColumn === 'rules'}
+                  testID="alerting-tab--rules"
+                >
+                  Notification Rules
+                </SelectGroup.Option>
+              </SelectGroup>
+              <div className="alerting-index--columns">
+                <GetResources resources={[ResourceType.Checks]}>
+                  <ChecksColumn />
+                </GetResources>
+                <GetResources resources={[ResourceType.NotificationEndpoints]}>
+                  <EndpointsColumn />
+                </GetResources>
+                <GetResources resources={[ResourceType.NotificationRules]}>
+                  <RulesColumn />
+                </GetResources>
+              </div>
             </GetAssetLimits>
           </GetResources>
         </Page.Contents>
       </Page>
-      {children}
+      <Switch>
+        <Route
+          path={`${alertsPath}/checks/new-threshold`}
+          component={NewThresholdCheckEO}
+        />
+        <Route
+          path={`${alertsPath}/checks/new-deadman`}
+          component={NewDeadmanCheckEO}
+        />
+        <Route
+          path={`${alertsPath}/checks/:checkID/edit`}
+          component={EditCheckEO}
+        />
+        <Route path={`${alertsPath}/rules/new`} component={NewRuleOverlay} />
+        <Route
+          path={`${alertsPath}/rules/:ruleID/edit`}
+          component={EditRuleOverlay}
+        />
+        <Route
+          path={`${alertsPath}/endpoints/new`}
+          component={NewEndpointOverlay}
+        />
+        <Route
+          path={`${alertsPath}/endpoints/:endpointID/edit`}
+          component={EditEndpointOverlay}
+        />
+      </Switch>
     </>
   )
 }
 
-const mstp = ({cloud: {limits}}: AppState): StateProps => {
+const mstp = ({cloud: {limits}}: AppState) => {
   return {
     limitStatus: extractMonitoringLimitStatus(limits),
     limitedResources: extractLimitedMonitoringResources(limits),
   }
 }
 
-export default connect(
-  mstp,
-  null
-)(AlertingIndex)
+export default connect(mstp)(AlertingIndex)

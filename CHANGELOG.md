@@ -1,3 +1,177 @@
+## v2.0.0-beta.15 [unreleased]
+
+### Features
+
+1. [18888](https://github.com/influxdata/influxdb/pull/18888): Add event source to influx stack operations
+1. [18910](https://github.com/influxdata/influxdb/pull/18910): Add uninstall functionality for stacks
+1. [18912](https://github.com/influxdata/influxdb/pull/18912): Drop deprecated influx pkg command tree
+
+### Bug Fixes
+
+1. [18891](https://github.com/influxdata/influxdb/pull/18891): Allow 0 to be the custom set minimum value for Y Domain
+1. [18969](https://github.com/influxdata/influxdb/pull/18969): Single Stat cells should render properly in Safari again
+1. [18974](https://github.com/influxdata/influxdb/pull/18974): Limit variable querying when submitting queries to used variables
+
+## v2.0.0-beta.14 [2020-07-08]
+
+### Features
+
+1. [18758](https://github.com/influxdata/influxdb/pull/18758): Extend influx stacks update cmd with ability to add resources without apply template
+1. [18793](https://github.com/influxdata/influxdb/pull/18793): Normalize InfluxDB templates under new /api/v2/templates and /api/v2/stacks public API
+1. [18818](https://github.com/influxdata/influxdb/pull/18818): Extend template Summary and Diff nested types with kind identifiers
+1. [18857](https://github.com/influxdata/influxdb/pull/18857): Flux updated to v0.71.1
+1. [18805](https://github.com/influxdata/influxdb/pull/18805): Added static builds for Linux
+
+### Bug Fixes
+
+1. [18878](https://github.com/influxdata/influxdb/pull/18878): Don't overwrite build date set via ldflags
+1. [18842](https://github.com/influxdata/influxdb/pull/18842): Fixed an issue where define query was unusable after importing a Check
+1. [18845](https://github.com/influxdata/influxdb/pull/18845): Update documentation links
+
+## v2.0.0-beta.13 [2020-06-25]
+
+### Features
+
+1. [18387](https://github.com/influxdata/influxdb/pull/18387): Integrate query cancellation after queries have been submitted
+1. [18515](https://github.com/influxdata/influxdb/pull/18515): Extend templates with the source file|url|reader.
+1. [18539](https://github.com/influxdata/influxdb/pull/18539): Collect stats on installed influxdata community template usage.
+1. [18541](https://github.com/influxdata/influxdb/pull/18541): Pkger allow raw github.com host URLs for yaml|json|jsonnet URLs
+1. [18546](https://github.com/influxdata/influxdb/pull/18546): Influx allow for files to be remotes for all template commands
+1. [18560](https://github.com/influxdata/influxdb/pull/18560): Extend stacks API with update capability
+1. [18568](https://github.com/influxdata/influxdb/pull/18568): Add support for config files to influxd and any cli.NewCommand use case
+1. [18573](https://github.com/influxdata/influxdb/pull/18573): Extend influx stacks cmd with new influx stacks update cmd
+1. [18595](https://github.com/influxdata/influxdb/pull/18595): Add ability to skip resources in a template by kind or by metadata.name
+1. [18600](https://github.com/influxdata/influxdb/pull/18600): Extend influx apply with resource filter capabilities
+1. [18601](https://github.com/influxdata/influxdb/pull/18601): Provide active config running influx config without args
+1. [18606](https://github.com/influxdata/influxdb/pull/18606): Enable influxd binary to look for a config file on startup
+1. [18647](https://github.com/influxdata/influxdb/pull/18647): Add support for env ref default values to the template parser
+1. [18655](https://github.com/influxdata/influxdb/pull/18655): Add support for platform variable selected field to templates
+
+### Bug Fixes
+
+1. [18602](https://github.com/influxdata/influxdb/pull/18602): Fix uint overflow during setup on 32bit systems
+1. [18623](https://github.com/influxdata/influxdb/pull/18623): Drop support for --local flag within influx CLI
+1. [18632](https://github.com/influxdata/influxdb/pull/18632): Prevents undefined queries in cells from erroring out in dashboards
+1. [18649](https://github.com/influxdata/influxdb/pull/18649): Fixes bucket selection issue and query builder state
+1. [18658](https://github.com/influxdata/influxdb/pull/18658): Add support for 'd' day and 'w' week time identifiers in the CLI for bucket and setup commands
+1. [18581](https://github.com/influxdata/influxdb/pull/18581): Cache dashboard cell query results to use as a reference for cell configurations
+1. [18707](https://github.com/influxdata/influxdb/pull/18707): Validate host-url for influx config create/set commands
+1. [18713](https://github.com/influxdata/influxdb/pull/18713): Fix influx CLI flags to accurately depict flags for all commands
+
+## v2.0.0-beta.12 [2020-06-12]
+
+### Features
+
+1. [18279](https://github.com/influxdata/influxdb/pull/18279): Make all pkg applications stateful via stacks
+1. [18322](https://github.com/influxdata/influxdb/pull/18322): Add ability to export a stack's existing (as they are in the platform) resource state as a pkg
+1. [18334](https://github.com/influxdata/influxdb/pull/18334): Update influx pkg commands with improved usage and examples in long form.
+1. [18344](https://github.com/influxdata/influxdb/pull/18344): Extend influx CLI with version and User-Agent.
+1. [18355](https://github.com/influxdata/influxdb/pull/18355): Integrate RedirectTo functionality so CLOUD users now get navigated back to the originally linked page after login
+1. [18392](https://github.com/influxdata/influxdb/pull/18392): Consolidate pkg influx commands under templates. This removes some nesting of the CLI commands as part of that.
+1. [18400](https://github.com/influxdata/influxdb/pull/18400): Dashboards maintain sort order after navigating away
+1. [18480](https://github.com/influxdata/influxdb/pull/18480): Allows tasks to open in new tabs
+1. [18553](https://github.com/influxdata/influxdb/pull/18553): Update usage and soften comparisons for kind matching on 'influx export --resourceType' cmd
+
+### Bug Fixes
+
+1. [18331](https://github.com/influxdata/influxdb/pull/18331): Support organization name in addition to ID in DBRP operations
+1. [18335](https://github.com/influxdata/influxdb/pull/18335): Disable failing when providing an unexpected error to influx CLI
+1. [18345](https://github.com/influxdata/influxdb/pull/18345): Have influx delete cmd respect the config
+1. [18385](https://github.com/influxdata/influxdb/pull/18385): Store initialization for pkger enforced on reads
+1. [18434](https://github.com/influxdata/influxdb/pull/18434): Backfill missing fillColumns field for histograms in pkger
+1. [18471](https://github.com/influxdata/influxdb/pull/18471): Notifies the user how to escape presentation mode when the feature is toggled
+
+### UI Improvements
+
+1. [18319](https://github.com/influxdata/influxdb/pull/18319): Display bucket ID in bucket list and enable 1 click copying
+1. [18361](https://github.com/influxdata/influxdb/pull/18361): Tokens list is now consistent with the other resource lists
+1. [18346](https://github.com/influxdata/influxdb/pull/18346): Reduce the number of variables being hydrated when toggling variables
+1. [18447](https://github.com/influxdata/influxdb/pull/18447): Redesign dashboard cell loading indicator to be more obvious
+1. [18593](https://github.com/influxdata/influxdb/pull/18593): Add copyable User and Organization Ids to About page
+
+## v2.0.0-beta.11 [2020-05-26]
+
+### Features
+
+1. [18011](https://github.com/influxdata/influxdb/pull/18011): Integrate UTC dropdown when making custom time range query
+1. [18040](https://github.com/influxdata/influxdb/pull/18040): Allow for min OR max y-axis visualization settings rather than min AND max
+1. [17764](https://github.com/influxdata/influxdb/pull/17764): Add CSV to line protocol conversion library
+1. [18059](https://github.com/influxdata/influxdb/pull/18059): Make the dropdown width adjustable
+1. [18173](https://github.com/influxdata/influxdb/pull/18173): Add version to /health response
+
+### Bug Fixes
+
+1. [18066](https://github.com/influxdata/influxdb/pull/18066): Fixed bug that wasn't persisting timeFormat for Graph + Single Stat selections
+1. [17959](https://github.com/influxdata/influxdb/pull/17959): Authorizer now exposes full permission set
+1. [18071](https://github.com/influxdata/influxdb/pull/18071): Fixed issue that was causing variable selections to hydrate all variable values
+1. [18016](https://github.com/influxdata/influxdb/pull/18016): Remove the fancy scrollbars
+1. [18171](https://github.com/influxdata/influxdb/pull/18171): Check status now displaying warning if loading a large amount
+
+## v2.0.0-beta.10 [2020-05-07]
+
+### Features
+
+1. [17934](https://github.com/influxdata/influxdb/pull/17934): Add ability to delete a stack and all the resources associated with it
+1. [17941](https://github.com/influxdata/influxdb/pull/17941): Enforce DNS name compliance on all pkger resources' metadata.name field
+1. [17989](https://github.com/influxdata/influxdb/pull/17989): Add stateful pkg management with stacks
+1. [18007](https://github.com/influxdata/influxdb/pull/18007): Add remove and list pkger stack commands to influx CLI
+1. [18017](https://github.com/influxdata/influxdb/pull/18017): Fixup display message for interactive influx setup cmd
+
+### Bug Fixes
+
+1. [17906](https://github.com/influxdata/influxdb/pull/17906): Ensure UpdateUser cleans up the index when updating names
+1. [17933](https://github.com/influxdata/influxdb/pull/17933): Ensure Checks can be set for zero values
+
+### UI Improvements
+
+1. [17860](https://github.com/influxdata/influxdb/pull/17860): Allow bucket creation from the Data Explorer and Cell Editor
+
+## v2.0.0-beta.9 [2020-04-23]
+
+### Features
+
+1. [17851](https://github.com/influxdata/influxdb/pull/17851): Add feature flag package capability and flags endpoint
+
+### Bug Fixes
+
+1. [17618](https://github.com/influxdata/influxdb/pull/17618): Add index for URM by user ID to improve lookup performance
+1. [17751](https://github.com/influxdata/influxdb/pull/17751): Existing session expiration time is respected on session renewal
+1. [17817](https://github.com/influxdata/influxdb/pull/17817): Make CLI respect env vars and flags in addition to the configs and extend support for config orgs to all commands
+
+### UI Improvements
+
+1. [17714](https://github.com/influxdata/influxdb/pull/17714): Cloud environments no longer render markdown images, for security reasons.
+1. [17321](https://github.com/influxdata/influxdb/pull/17321): Improve UI for sorting resources
+1. [17740](https://github.com/influxdata/influxdb/pull/17740): Add single-color color schemes for visualizations
+1. [17849](https://github.com/influxdata/influxdb/pull/17849): Move Organization navigation items to user menu.
+
+## v2.0.0-beta.8 [2020-04-10]
+
+### Features
+
+1. [17490](https://github.com/influxdata/influxdb/pull/17490): `influx config -`, to switch back to previous activated configuration
+1. [17581](https://github.com/influxdata/influxdb/pull/17581): Introduce new navigation menu
+1. [17595](https://github.com/influxdata/influxdb/pull/17595): Add -f (--file) option to `influx query` and `influx task` commands
+1. [17498](https://github.com/influxdata/influxdb/pull/17498): Added support for command line options to limit memory for queries
+
+### Bug Fixes
+
+1. [17257](https://github.com/influxdata/influxdb/pull/17769): Fix retention policy after bucket is migrated
+1. [17612](https://github.com/influxdata/influxdb/pull/17612): Fix card size and layout jank in dashboards index view
+1. [17651](https://github.com/influxdata/influxdb/pull/17651): Fix check graph font and lines defaulting to black causing graph to be unreadable
+1. [17660](https://github.com/influxdata/influxdb/pull/17660): Fix text wrapping display issue and popover sizing bug when adding labels to a resource
+1. [17670](https://github.com/influxdata/influxdb/pull/17670): Respect the now-time of the compiled query if it's provided
+1. [17692](https://github.com/influxdata/influxdb/pull/17692): Update giraffe to fix spacing between ticks
+1. [17694](https://github.com/influxdata/influxdb/pull/17694): Fixed typos in the Flux functions list
+1. [17701](https://github.com/influxdata/influxdb/pull/17701): Allow mouse cursor inside Script Editor for Safari
+1. [17609](https://github.com/influxdata/influxdb/pull/17609): Fixed an issue where Variables could not use other Variables
+1. [17754](https://github.com/influxdata/influxdb/pull/17754): Adds error messaging for Cells in Dashboard View
+
+### UI Improvements
+
+1. [17583](https://github.com/influxdata/influxdb/pull/17583): Update layout of Alerts page to work on all screen sizes
+1. [17657](https://github.com/influxdata/influxdb/pull/17657): Sort dashboards on Getting Started page by recently modified
+
 ## v2.0.0-beta.7 [2020-03-27]
 
 ### Features
@@ -21,6 +195,10 @@
 1. [17391](https://github.com/influxdata/influxdb/pull/17391): Fixed threshold check bug where checks could not be created when a field had a space in the name
 1. [17384](https://github.com/influxdata/influxdb/pull/17384): Reuse slices built by iterator to reduce allocations
 1. [17404](https://github.com/influxdata/influxdb/pull/17404): Updated duplicate check error message to be more explicit and actionable
+1. [17515](https://github.com/influxdata/influxdb/pull/17515): Editing a table cell shows the proper values and respects changes
+1. [17521](https://github.com/influxdata/influxdb/pull/17521): Table view scrolling should be slightly smoother
+1. [17601](https://github.com/influxdata/influxdb/pull/17601): URL table values on single columns are being correctly parsed
+1. [17552](https://github.com/influxdata/influxdb/pull/17552): Fixed a regression bug that insert aggregate functions where the cursor is rather than a new line
 
 ### UI Improvements
 

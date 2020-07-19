@@ -1,23 +1,23 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/influxdata/influxdb/kit/check"
+	"github.com/influxdata/influxdb/v2/kit/check"
 	"github.com/spf13/cobra"
 )
 
 func cmdPing(f *globalFlags, opts genericCLIOpts) *cobra.Command {
 	runE := func(cmd *cobra.Command, args []string) error {
-		if flags.local {
-			return fmt.Errorf("local flag not supported for ping command")
-		}
-
 		c := http.Client{
 			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: flags.skipVerify},
+			},
 		}
 		url := flags.Host + "/health"
 		resp, err := c.Get(url)
@@ -46,6 +46,7 @@ func cmdPing(f *globalFlags, opts genericCLIOpts) *cobra.Command {
 	cmd := opts.newCmd("ping", runE, true)
 	cmd.Short = "Check the InfluxDB /health endpoint"
 	cmd.Long = `Checks the health of a running InfluxDB instance by querying /health. Does not require valid token.`
+	f.registerFlags(cmd, "token")
 
 	return cmd
 }

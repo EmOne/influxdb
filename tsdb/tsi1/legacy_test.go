@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/influxdata/influxdb/tsdb/seriesfile"
+	"github.com/influxdata/influxdb/v2/tsdb/seriesfile"
 )
 
 func TestLegacyOpen(t *testing.T) {
@@ -14,7 +14,7 @@ func TestLegacyOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
 
 	sfile := seriesfile.NewSeriesFile(dir)
 	if err := sfile.Open(context.Background()); err != nil {

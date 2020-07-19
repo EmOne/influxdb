@@ -12,11 +12,12 @@ import (
 	"github.com/influxdata/flux/execute"
 	"github.com/influxdata/flux/lang"
 	"github.com/influxdata/flux/memory"
+	"github.com/influxdata/flux/runtime"
 	"github.com/influxdata/flux/values"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
-	"github.com/influxdata/influxdb/query"
-	_ "github.com/influxdata/influxdb/query/builtin"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/query"
+	_ "github.com/influxdata/influxdb/v2/query/builtin"
 )
 
 type fakeQueryService struct {
@@ -31,7 +32,7 @@ type fakeQueryService struct {
 var _ query.AsyncQueryService = (*fakeQueryService)(nil)
 
 func makeAST(q string) lang.ASTCompiler {
-	pkg, err := flux.Parse(q)
+	pkg, err := runtime.ParseToJSON(q)
 	if err != nil {
 		panic(err)
 	}

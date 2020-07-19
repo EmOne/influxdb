@@ -5,7 +5,7 @@ import React, {PureComponent} from 'react'
 import EmptyGraphMessage from 'src/shared/components/EmptyGraphMessage'
 import EmptyGraphErrorTooltip from 'src/shared/components/EmptyGraphErrorTooltip'
 import EmptyGraphError from 'src/shared/components/EmptyGraphError'
-import Markdown from 'src/shared/components/views/Markdown'
+import ScrollableMarkdown from 'src/shared/components/views/ScrollableMarkdown'
 
 // Constants
 import {emptyGraphCopy} from 'src/shared/copy/cell'
@@ -20,12 +20,12 @@ export enum ErrorFormat {
 }
 
 interface Props {
-  errorMessage: string
+  errorMessage?: string
   errorFormat: ErrorFormat
-  isInitialFetch: boolean
+  isInitialFetch?: boolean
   loading: RemoteDataState
   hasResults: boolean
-  queries: DashboardQuery[]
+  queries?: DashboardQuery[]
   fallbackNote?: string
 }
 
@@ -41,7 +41,10 @@ export default class EmptyQueryView extends PureComponent<Props> {
       errorFormat,
     } = this.props
 
-    if (loading === RemoteDataState.NotStarted || !queries.length) {
+    if (
+      loading === RemoteDataState.NotStarted ||
+      (queries && !queries.length)
+    ) {
       return (
         <EmptyGraphMessage
           message={emptyGraphCopy}
@@ -69,11 +72,11 @@ export default class EmptyQueryView extends PureComponent<Props> {
       (isInitialFetch || !hasResults) &&
       loading === RemoteDataState.Loading
     ) {
-      return <EmptyGraphMessage message="Loading..." />
+      return <EmptyGraphMessage message="" />
     }
 
     if (!hasResults && fallbackNote) {
-      return <Markdown text={fallbackNote} />
+      return <ScrollableMarkdown text={fallbackNote} />
     }
 
     if (!hasResults) {

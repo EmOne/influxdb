@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
-	"github.com/influxdata/influxdb/tenant"
-	influxdbtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/tenant"
+	influxdbtesting "github.com/influxdata/influxdb/v2/testing"
 )
 
 func TestBoltOrganizationService(t *testing.T) {
@@ -28,10 +28,7 @@ func initBoltOrganizationService(f influxdbtesting.OrganizationFields, t *testin
 }
 
 func initOrganizationService(s kv.Store, f influxdbtesting.OrganizationFields, t *testing.T) (influxdb.OrganizationService, string, func()) {
-	storage, err := tenant.NewStore(s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	storage := tenant.NewStore(s)
 	svc := tenant.NewService(storage)
 
 	for _, o := range f.Organizations {

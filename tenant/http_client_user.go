@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/influxdata/influxdb"
-	ihttp "github.com/influxdata/influxdb/http"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2"
+	ihttp "github.com/influxdata/influxdb/v2/http"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 )
 
 // UserService connects to Influx via HTTP using tokens to manage users
@@ -72,7 +72,7 @@ func (s *UserClientService) FindUser(ctx context.Context, filter influxdb.UserFi
 // FindUsers returns a list of users that match filter and the total count of matching users.
 // Additional options provide pagination & sorting.
 func (s *UserClientService) FindUsers(ctx context.Context, filter influxdb.UserFilter, opt ...influxdb.FindOptions) ([]*influxdb.User, int, error) {
-	params := findOptionParams(opt...)
+	params := influxdb.FindOptionParams(opt...)
 	if filter.ID != nil {
 		params = append(params, [2]string{"id", filter.ID.String()})
 	}
@@ -124,6 +124,19 @@ func (s *UserClientService) DeleteUser(ctx context.Context, id influxdb.ID) erro
 			return ihttp.CheckErrorStatus(http.StatusNoContent, resp)
 		}).
 		Do(ctx)
+}
+
+// FindUserByID returns a single user by ID.
+func (s *UserClientService) FindPermissionForUser(ctx context.Context, id influxdb.ID) (influxdb.PermissionSet, error) {
+	var ps influxdb.PermissionSet
+	err := s.Client.
+		Get(prefixUsers, id.String(), "permissions").
+		DecodeJSON(&ps).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ps, nil
 }
 
 // PasswordClientService is an http client to speak to the password service.

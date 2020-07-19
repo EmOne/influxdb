@@ -6,9 +6,11 @@ import {
   FunnelPage,
   Heading,
   HeadingElement,
+  InfluxColors,
   InfluxDBCloudLogo,
   Typeface,
 } from '@influxdata/clockface'
+import Notifications from 'src/shared/components/notifications/Notifications'
 
 // Components
 import ErrorBoundary from 'src/shared/components/ErrorBoundary'
@@ -16,25 +18,22 @@ import LoginPageContents from 'src/onboarding/containers/LoginPageContents'
 
 export const LoginPage: FC = () => (
   <ErrorBoundary>
-    <AppWrapper className="sign-up--page">
+    <AppWrapper>
+      <Notifications />
       <FunnelPage
+        accentColorA={InfluxColors.Magenta}
+        accentColorB={InfluxColors.Amethyst}
+        backgroundColor={InfluxColors.DeepPurple}
+        enableGraphic={true}
         logo={<InfluxDBCloudLogo cloud={true} className="login-page--logo" />}
       >
         <Heading
-          element={HeadingElement.H2}
+          element={HeadingElement.H1}
           type={Typeface.Rubik}
           weight={FontWeight.Regular}
-          className="heading--margins"
+          className="cf-funnel-page--title"
         >
-          Create your Free InfluxDB Cloud Account
-        </Heading>
-        <Heading
-          element={HeadingElement.H5}
-          type={Typeface.Rubik}
-          weight={FontWeight.Regular}
-          className="heading--margins"
-        >
-          No credit card required
+          Log in to your InfluxDB Cloud Account
         </Heading>
         <LoginPageContents />
       </FunnelPage>

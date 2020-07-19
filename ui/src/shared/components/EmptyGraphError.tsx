@@ -7,9 +7,10 @@ import {
   Button,
   ComponentSize,
   ComponentColor,
+  Icon,
   IconFont,
+  DapperScrollbars,
 } from '@influxdata/clockface'
-import FancyScrollbar from 'src/shared/components/fancy_scrollbar/FancyScrollbar'
 
 interface Props {
   message: string
@@ -29,7 +30,7 @@ const EmptyGraphError: FunctionComponent<Props> = ({message, testID}) => {
 
   return (
     <div className="cell--view-empty" data-testid={testID}>
-      <div className="empty-graph-error">
+      <div className="empty-graph-error" data-testid="empty-graph-error">
         <CopyToClipboard text={message}>
           <Button
             size={ComponentSize.ExtraSmall}
@@ -40,21 +41,12 @@ const EmptyGraphError: FunctionComponent<Props> = ({message, testID}) => {
             className="empty-graph-error--copy"
           />
         </CopyToClipboard>
-        <FancyScrollbar
-          className="empty-graph-error--scroll"
-          autoHide={false}
-          thumbStartColor="#FF8564"
-          thumbStopColor="#DC4E58"
-        >
+        <DapperScrollbars className="empty-graph-error--scroll" autoHide={true}>
           <pre>
-            <span
-              className={`icon ${
-                IconFont.AlertTriangle
-              } empty-graph-error--icon`}
-            />
-            <code className="cell--error-message">{message}</code>
+            <Icon glyph={IconFont.AlertTriangle} />
+            <code className="cell--error-message"> {message}</code>
           </pre>
-        </FancyScrollbar>
+        </DapperScrollbars>
       </div>
     </div>
   )

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 	"go.uber.org/zap"
 )
 
@@ -28,10 +28,10 @@ func (l *BucketLogger) CreateBucket(ctx context.Context, u *influxdb.Bucket) (er
 	defer func(start time.Time) {
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
-			l.logger.Error("failed to create bucket", zap.Error(err), dur)
+			l.logger.Debug("failed to create bucket", zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("bucket create", dur)
+		l.logger.Debug("bucket create", dur)
 	}(time.Now())
 	return l.bucketService.CreateBucket(ctx, u)
 }
@@ -41,10 +41,10 @@ func (l *BucketLogger) FindBucketByID(ctx context.Context, id influxdb.ID) (u *i
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
 			msg := fmt.Sprintf("failed to find bucket with ID %v", id)
-			l.logger.Error(msg, zap.Error(err), dur)
+			l.logger.Debug(msg, zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("bucket find by ID", dur)
+		l.logger.Debug("bucket find by ID", dur)
 	}(time.Now())
 	return l.bucketService.FindBucketByID(ctx, id)
 }
@@ -54,10 +54,10 @@ func (l *BucketLogger) FindBucketByName(ctx context.Context, orgID influxdb.ID, 
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
 			msg := fmt.Sprintf("failed to find bucket with name %v in org %v", name, orgID)
-			l.logger.Error(msg, zap.Error(err), dur)
+			l.logger.Debug(msg, zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("bucket find by name", dur)
+		l.logger.Debug("bucket find by name", dur)
 	}(time.Now())
 	return l.bucketService.FindBucketByName(ctx, orgID, name)
 }
@@ -66,10 +66,10 @@ func (l *BucketLogger) FindBucket(ctx context.Context, filter influxdb.BucketFil
 	defer func(start time.Time) {
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
-			l.logger.Error("failed to find bucket matching the given filter", zap.Error(err), dur)
+			l.logger.Debug("failed to find bucket matching the given filter", zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("bucket find", dur)
+		l.logger.Debug("bucket find", dur)
 	}(time.Now())
 	return l.bucketService.FindBucket(ctx, filter)
 }
@@ -78,22 +78,22 @@ func (l *BucketLogger) FindBuckets(ctx context.Context, filter influxdb.BucketFi
 	defer func(start time.Time) {
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
-			l.logger.Error("failed to find bucket matching the given filter", zap.Error(err), dur)
+			l.logger.Debug("failed to find bucket matching the given filter", zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("buckets find", dur)
+		l.logger.Debug("buckets find", dur)
 	}(time.Now())
-	return l.bucketService.FindBuckets(ctx, filter)
+	return l.bucketService.FindBuckets(ctx, filter, opt...)
 }
 
 func (l *BucketLogger) UpdateBucket(ctx context.Context, id influxdb.ID, upd influxdb.BucketUpdate) (u *influxdb.Bucket, err error) {
 	defer func(start time.Time) {
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
-			l.logger.Error("failed to update bucket", zap.Error(err), dur)
+			l.logger.Debug("failed to update bucket", zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("bucket update", dur)
+		l.logger.Debug("bucket update", dur)
 	}(time.Now())
 	return l.bucketService.UpdateBucket(ctx, id, upd)
 }
@@ -103,10 +103,10 @@ func (l *BucketLogger) DeleteBucket(ctx context.Context, id influxdb.ID) (err er
 		dur := zap.Duration("took", time.Since(start))
 		if err != nil {
 			msg := fmt.Sprintf("failed to delete bucket with ID %v", id)
-			l.logger.Error(msg, zap.Error(err), dur)
+			l.logger.Debug(msg, zap.Error(err), dur)
 			return
 		}
-		l.logger.Info("bucket delete", dur)
+		l.logger.Debug("bucket delete", dur)
 	}(time.Now())
 	return l.bucketService.DeleteBucket(ctx, id)
 }

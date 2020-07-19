@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
 )
 
 var (
@@ -15,22 +15,6 @@ var (
 	labelMappingBucket = []byte("labelmappingsv1")
 	labelIndex         = []byte("labelindexv1")
 )
-
-func (s *Service) initializeLabels(ctx context.Context, tx Tx) error {
-	if _, err := tx.Bucket(labelBucket); err != nil {
-		return err
-	}
-
-	if _, err := tx.Bucket(labelMappingBucket); err != nil {
-		return err
-	}
-
-	if _, err := tx.Bucket(labelIndex); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 // FindLabelByID finds a label by its ID
 func (s *Service) FindLabelByID(ctx context.Context, id influxdb.ID) (*influxdb.Label, error) {
@@ -209,6 +193,17 @@ func (s *Service) createLabelMapping(ctx context.Context, tx Tx, m *influxdb.Lab
 		return err
 	}
 
+	ls := []*influxdb.Label{}
+	err := s.findResourceLabels(ctx, tx, influxdb.LabelMappingFilter{ResourceID: m.ResourceID, ResourceType: m.ResourceType}, &ls)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(ls); i++ {
+		if ls[i].ID == m.LabelID {
+			return influxdb.ErrLabelExistsOnResource
+		}
+	}
+
 	if err := s.putLabelMapping(ctx, tx, m); err != nil {
 		return err
 	}
@@ -298,6 +293,14 @@ func (s *Service) PutLabel(ctx context.Context, l *influxdb.Label) error {
 		}
 		return err
 	})
+}
+
+// CreateUserResourceMappingForOrg is a public function that calls createUserResourceMappingForOrg used only for the label service
+// it can be removed when URMs are removed from the label service
+func (s *Service) CreateUserResourceMappingForOrg(ctx context.Context, tx Tx, orgID influxdb.ID, resID influxdb.ID, resType influxdb.ResourceType) error {
+	err := s.createUserResourceMappingForOrg(ctx, tx, orgID, resID, resType)
+
+	return err
 }
 
 func (s *Service) createUserResourceMappingForOrg(ctx context.Context, tx Tx, orgID influxdb.ID, resID influxdb.ID, resType influxdb.ResourceType) error {

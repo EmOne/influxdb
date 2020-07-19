@@ -3,14 +3,13 @@ package testing
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
 )
 
 const (
@@ -51,7 +50,7 @@ type BucketSvcOpts struct {
 	NoHooks bool
 }
 
-// WithoutHooks allows the test suite to be run without being able to hook into the underlieing implementation of theservice
+// WithoutHooks allows the test suite to be run without being able to hook into the underlying implementation of theservice
 // in most cases that is to remove specific id generation controls.
 func WithoutHooks() BucketSvcOpts {
 	return BucketSvcOpts{
@@ -116,6 +115,8 @@ func BucketService(
 			continue
 		}
 		t.Run(tt.name, func(t *testing.T) {
+			tt := tt
+			t.Parallel()
 			tt.fn(init, t)
 		})
 	}
@@ -266,7 +267,7 @@ func CreateBucket(
 				err: &influxdb.Error{
 					Code: influxdb.EConflict,
 					Op:   influxdb.OpCreateBucket,
-					Msg:  fmt.Sprintf("bucket with name bucket1 already exists"),
+					Msg:  "bucket with name bucket1 already exists",
 				},
 			},
 		},
@@ -434,7 +435,7 @@ func IDUnique(
 				},
 				err: &influxdb.Error{
 					Code: influxdb.EInternal,
-					Msg:  fmt.Sprintf("unable to generate valid id"),
+					Msg:  "unable to generate valid id",
 				},
 			},
 		},
@@ -474,7 +475,7 @@ func IDUnique(
 				},
 				err: &influxdb.Error{
 					Code: influxdb.EInternal,
-					Msg:  fmt.Sprintf("unable to generate valid id"),
+					Msg:  "unable to generate valid id",
 				},
 			},
 		},
@@ -1136,6 +1137,7 @@ func FindBucket(
 	type args struct {
 		name           string
 		organizationID influxdb.ID
+		id             influxdb.ID
 	}
 
 	type wants struct {
@@ -1184,6 +1186,40 @@ func FindBucket(
 			},
 		},
 		{
+			name: "find bucket by id",
+			fields: BucketFields{
+				Organizations: []*influxdb.Organization{
+					{
+						Name: "theorg",
+						ID:   MustIDBase16(orgOneID),
+					},
+				},
+				Buckets: []*influxdb.Bucket{
+					{
+						ID:    MustIDBase16(bucketOneID),
+						OrgID: MustIDBase16(orgOneID),
+						Name:  "abc",
+					},
+					{
+						ID:    MustIDBase16(bucketTwoID),
+						OrgID: MustIDBase16(orgOneID),
+						Name:  "xyz",
+					},
+				},
+			},
+			args: args{
+				id:             MustIDBase16(bucketOneID),
+				organizationID: MustIDBase16(orgOneID),
+			},
+			wants: wants{
+				bucket: &influxdb.Bucket{
+					ID:    MustIDBase16(bucketOneID),
+					OrgID: MustIDBase16(orgOneID),
+					Name:  "abc",
+				},
+			},
+		},
+		{
 			name: "missing bucket returns error",
 			fields: BucketFields{
 				Organizations: []*influxdb.Organization{
@@ -1216,6 +1252,9 @@ func FindBucket(
 			filter := influxdb.BucketFilter{}
 			if tt.args.name != "" {
 				filter.Name = &tt.args.name
+			}
+			if tt.args.id.Valid() {
+				filter.ID = &tt.args.id
 			}
 			if tt.args.organizationID.Valid() {
 				filter.OrganizationID = &tt.args.organizationID

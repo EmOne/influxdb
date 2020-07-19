@@ -1,5 +1,5 @@
 // APIs
-import {parse} from '@influxdata/flux-parser'
+import {parse} from 'src/external/parser'
 
 // Utils
 import {getMinDurationFromAST} from 'src/shared/utils/getMinDurationFromAST'
@@ -57,7 +57,6 @@ export const getWindowPeriod = (
   }
   try {
     const ast = parse(query)
-
     const substitutedAST: Package = {
       package: '',
       type: 'Package',

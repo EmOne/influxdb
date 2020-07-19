@@ -1,45 +1,39 @@
 // Libraries
 import React, {FunctionComponent, useState} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import BuilderCard from 'src/timeMachine/components/builderCard/BuilderCard'
 import WaitingText from 'src/shared/components/WaitingText'
 import SelectorList from 'src/timeMachine/components/SelectorList'
+import SelectorListCreateBucket from 'src/timeMachine/components/SelectorListCreateBucket'
 import {Input} from '@influxdata/clockface'
 
 // Actions
 import {selectBucket} from 'src/timeMachine/actions/queryBuilder'
 
 // Utils
-import {getActiveTimeMachine, getActiveQuery} from 'src/timeMachine/selectors'
+import {getActiveQuery} from 'src/timeMachine/selectors'
+import {getAll, getStatus} from 'src/resources/selectors'
 
 // Types
-import {AppState} from 'src/types'
+import {AppState, Bucket, ResourceType} from 'src/types'
 import {RemoteDataState} from 'src/types'
 
-interface StateProps {
-  selectedBucket: string
-  buckets: string[]
-  bucketsStatus: RemoteDataState
-}
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps
 
-interface DispatchProps {
-  onSelectBucket: (bucket: string, resetSelections: boolean) => void
-}
-
-type Props = StateProps & DispatchProps
-
-const fb = term => b => b.toLocaleLowerCase().includes(term.toLocaleLowerCase())
+const fb = term => bucket =>
+  bucket.toLocaleLowerCase().includes(term.toLocaleLowerCase())
 
 const BucketSelector: FunctionComponent<Props> = ({
   selectedBucket,
-  buckets,
+  bucketNames,
   bucketsStatus,
   onSelectBucket,
 }) => {
   const [searchTerm, setSearchTerm] = useState('')
-  const list = buckets.filter(fb(searchTerm))
+  const list = bucketNames.filter(fb(searchTerm))
 
   const onSelect = (bucket: string) => {
     onSelectBucket(bucket, true)
@@ -57,7 +51,7 @@ const BucketSelector: FunctionComponent<Props> = ({
     )
   }
 
-  if (bucketsStatus === RemoteDataState.Done && !buckets.length) {
+  if (bucketsStatus === RemoteDataState.Done && !bucketNames.length) {
     return <BuilderCard.Empty>No buckets found</BuilderCard.Empty>
   }
 
@@ -97,23 +91,27 @@ const Selector: FunctionComponent<SelectorProps> = ({
       selectedItems={[selected]}
       onSelectItem={onSelect}
       multiSelect={false}
-    />
+      testID="buckets-list"
+    >
+      <SelectorListCreateBucket />
+    </SelectorList>
   )
 }
 
 const mstp = (state: AppState) => {
-  const {buckets, bucketsStatus} = getActiveTimeMachine(state).queryBuilder
+  const buckets = getAll<Bucket>(state, ResourceType.Buckets)
+  const bucketNames = buckets.map(bucket => bucket.name || '')
+  const bucketsStatus = getStatus(state, ResourceType.Buckets)
   const selectedBucket =
-    getActiveQuery(state).builderConfig.buckets[0] || buckets[0]
+    getActiveQuery(state).builderConfig.buckets[0] || bucketNames[0]
 
-  return {selectedBucket, buckets, bucketsStatus}
+  return {selectedBucket, bucketNames, bucketsStatus}
 }
 
 const mdtp = {
   onSelectBucket: selectBucket,
 }
 
-export default connect<StateProps, DispatchProps, {}>(
-  mstp,
-  mdtp
-)(BucketSelector)
+const connector = connect(mstp, mdtp)
+
+export default connector(BucketSelector)

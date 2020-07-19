@@ -4,16 +4,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
 )
 
-func TestPaging_decodeFindOptions(t *testing.T) {
+func TestPaging_DecodeFindOptions(t *testing.T) {
 	type args struct {
 		queryParams map[string]string
 	}
 	type wants struct {
-		opts platform.FindOptions
+		opts influxdb.FindOptions
 	}
 
 	tests := []struct {
@@ -32,7 +32,7 @@ func TestPaging_decodeFindOptions(t *testing.T) {
 				},
 			},
 			wants: wants{
-				opts: platform.FindOptions{
+				opts: influxdb.FindOptions{
 					Offset:     10,
 					Limit:      10,
 					SortBy:     "updateTime",
@@ -48,7 +48,7 @@ func TestPaging_decodeFindOptions(t *testing.T) {
 				},
 			},
 			wants: wants{
-				opts: platform.FindOptions{
+				opts: influxdb.FindOptions{
 					Offset:     0,
 					Limit:      10,
 					SortBy:     "",
@@ -67,36 +67,36 @@ func TestPaging_decodeFindOptions(t *testing.T) {
 			}
 			r.URL.RawQuery = qp.Encode()
 
-			opts, err := decodeFindOptions(r)
+			opts, err := influxdb.DecodeFindOptions(r)
 			if err != nil {
 				t.Errorf("%q failed, err: %s", tt.name, err.Error())
 			}
 
 			if opts.Offset != tt.wants.opts.Offset {
-				t.Errorf("%q. decodeFindOptions() = %v, want %v", tt.name, opts.Offset, tt.wants.opts.Offset)
+				t.Errorf("%q. influxdb.DecodeFindOptions() = %v, want %v", tt.name, opts.Offset, tt.wants.opts.Offset)
 			}
 			if opts.Limit != tt.wants.opts.Limit {
-				t.Errorf("%q. decodeFindOptions() = %v, want %v", tt.name, opts.Limit, tt.wants.opts.Limit)
+				t.Errorf("%q. influxdb.DecodeFindOptions() = %v, want %v", tt.name, opts.Limit, tt.wants.opts.Limit)
 			}
 			if opts.SortBy != tt.wants.opts.SortBy {
-				t.Errorf("%q. decodeFindOptions() = %v, want %v", tt.name, opts.SortBy, tt.wants.opts.SortBy)
+				t.Errorf("%q. influxdb.DecodeFindOptions() = %v, want %v", tt.name, opts.SortBy, tt.wants.opts.SortBy)
 			}
 			if opts.Descending != tt.wants.opts.Descending {
-				t.Errorf("%q. decodeFindOptions() = %v, want %v", tt.name, opts.Descending, tt.wants.opts.Descending)
+				t.Errorf("%q. influxdb.DecodeFindOptions() = %v, want %v", tt.name, opts.Descending, tt.wants.opts.Descending)
 			}
 		})
 	}
 }
 
-func TestPaging_newPagingLinks(t *testing.T) {
+func TestPaging_NewPagingLinks(t *testing.T) {
 	type args struct {
 		basePath string
 		num      int
-		opts     platform.FindOptions
+		opts     influxdb.FindOptions
 		filter   mock.PagingFilter
 	}
 	type wants struct {
-		links platform.PagingLinks
+		links influxdb.PagingLinks
 	}
 
 	tests := []struct {
@@ -109,7 +109,7 @@ func TestPaging_newPagingLinks(t *testing.T) {
 			args: args{
 				basePath: "/api/v2/buckets",
 				num:      50,
-				opts: platform.FindOptions{
+				opts: influxdb.FindOptions{
 					Offset:     10,
 					Limit:      10,
 					Descending: true,
@@ -120,7 +120,7 @@ func TestPaging_newPagingLinks(t *testing.T) {
 				},
 			},
 			wants: wants{
-				links: platform.PagingLinks{
+				links: influxdb.PagingLinks{
 					Prev: "/api/v2/buckets?descending=true&limit=10&name=name&offset=0&type=type1&type=type2",
 					Self: "/api/v2/buckets?descending=true&limit=10&name=name&offset=10&type=type1&type=type2",
 					Next: "/api/v2/buckets?descending=true&limit=10&name=name&offset=20&type=type1&type=type2",
@@ -132,7 +132,7 @@ func TestPaging_newPagingLinks(t *testing.T) {
 			args: args{
 				basePath: "/api/v2/buckets",
 				num:      50,
-				opts: platform.FindOptions{
+				opts: influxdb.FindOptions{
 					Offset:     0,
 					Limit:      10,
 					Descending: true,
@@ -143,7 +143,7 @@ func TestPaging_newPagingLinks(t *testing.T) {
 				},
 			},
 			wants: wants{
-				links: platform.PagingLinks{
+				links: influxdb.PagingLinks{
 					Prev: "",
 					Self: "/api/v2/buckets?descending=true&limit=10&name=name&offset=0&type=type1&type=type2",
 					Next: "/api/v2/buckets?descending=true&limit=10&name=name&offset=10&type=type1&type=type2",
@@ -155,7 +155,7 @@ func TestPaging_newPagingLinks(t *testing.T) {
 			args: args{
 				basePath: "/api/v2/buckets",
 				num:      5,
-				opts: platform.FindOptions{
+				opts: influxdb.FindOptions{
 					Offset:     10,
 					Limit:      10,
 					Descending: true,
@@ -166,7 +166,7 @@ func TestPaging_newPagingLinks(t *testing.T) {
 				},
 			},
 			wants: wants{
-				links: platform.PagingLinks{
+				links: influxdb.PagingLinks{
 					Prev: "/api/v2/buckets?descending=true&limit=10&name=name&offset=0&type=type1&type=type2",
 					Self: "/api/v2/buckets?descending=true&limit=10&name=name&offset=10&type=type1&type=type2",
 					Next: "",
@@ -177,18 +177,18 @@ func TestPaging_newPagingLinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			links := newPagingLinks(tt.args.basePath, tt.args.opts, tt.args.filter, tt.args.num)
+			links := influxdb.NewPagingLinks(tt.args.basePath, tt.args.opts, tt.args.filter, tt.args.num)
 
 			if links.Prev != tt.wants.links.Prev {
-				t.Errorf("%q. newPagingLinks() = %v, want %v", tt.name, links.Prev, tt.wants.links.Prev)
+				t.Errorf("%q. influxdb.NewPagingLinks() = %v, want %v", tt.name, links.Prev, tt.wants.links.Prev)
 			}
 
 			if links.Self != tt.wants.links.Self {
-				t.Errorf("%q. newPagingLinks() = %v, want %v", tt.name, links.Self, tt.wants.links.Self)
+				t.Errorf("%q. influxdb.NewPagingLinks() = %v, want %v", tt.name, links.Self, tt.wants.links.Self)
 			}
 
 			if links.Next != tt.wants.links.Next {
-				t.Errorf("%q. newPagingLinks() = %v, want %v", tt.name, links.Next, tt.wants.links.Next)
+				t.Errorf("%q. influxdb.NewPagingLinks() = %v, want %v", tt.name, links.Next, tt.wants.links.Next)
 			}
 		})
 	}

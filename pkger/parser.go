@@ -8,20 +8,23 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/pkg/jsonnet"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/pkg/jsonnet"
 	"gopkg.in/yaml.v3"
 )
 
 type (
 	// ReaderFn is used for functional inputs to abstract the individual
 	// entrypoints for the reader itself.
-	ReaderFn func() (io.Reader, error)
+	ReaderFn func() (r io.Reader, source string, err error)
 
 	// Encoder is an encodes a type.
 	Encoder interface {
@@ -62,89 +65,150 @@ func (e Encoding) String() string {
 var ErrInvalidEncoding = errors.New("invalid encoding provided")
 
 // Parse parses a pkg defined by the encoding and readerFns. As of writing this
-// we can parse both a YAML, JSON, and Jsonnet formats of the Pkg model.
-func Parse(encoding Encoding, readerFn ReaderFn, opts ...ValidateOptFn) (*Pkg, error) {
-	r, err := readerFn()
+// we can parse both a YAML, JSON, and Jsonnet formats of the Template model.
+func Parse(encoding Encoding, readerFn ReaderFn, opts ...ValidateOptFn) (*Template, error) {
+	r, source, err := readerFn()
 	if err != nil {
 		return nil, err
 	}
 
+	var pkgFn func(io.Reader, ...ValidateOptFn) (*Template, error)
 	switch encoding {
 	case EncodingJSON:
-		return parseJSON(r, opts...)
+		pkgFn = parseJSON
 	case EncodingJsonnet:
-		return parseJsonnet(r, opts...)
+		pkgFn = parseJsonnet
 	case EncodingSource:
-		return parseSource(r, opts...)
+		pkgFn = parseSource
 	case EncodingYAML:
-		return parseYAML(r, opts...)
+		pkgFn = parseYAML
 	default:
 		return nil, ErrInvalidEncoding
 	}
+
+	pkg, err := pkgFn(r, opts...)
+	if err != nil {
+		return nil, err
+	}
+	pkg.sources = []string{source}
+
+	return pkg, nil
 }
 
 // FromFile reads a file from disk and provides a reader from it.
 func FromFile(filePath string) ReaderFn {
-	return func() (io.Reader, error) {
-		// not using os.Open to avoid having to deal with closing the file in here
-		b, err := ioutil.ReadFile(filePath)
+	return func() (io.Reader, string, error) {
+		u, err := url.Parse(filePath)
 		if err != nil {
-			return nil, err
+			return nil, filePath, &influxdb.Error{
+				Code: influxdb.EInvalid,
+				Msg:  "invalid filepath provided",
+				Err:  err,
+			}
 		}
-		return bytes.NewBuffer(b), nil
+		if u.Scheme == "" {
+			u.Scheme = "file"
+		}
+
+		// not using os.Open to avoid having to deal with closing the file in here
+		b, err := ioutil.ReadFile(u.Path)
+		if err != nil {
+			return nil, filePath, err
+		}
+
+		return bytes.NewBuffer(b), u.String(), nil
 	}
 }
 
 // FromReader simply passes the reader along. Useful when consuming
 // this from an HTTP request body. There are a number of other useful
 // places for this functional input.
-func FromReader(r io.Reader) ReaderFn {
-	return func() (io.Reader, error) {
-		return r, nil
+func FromReader(r io.Reader, sources ...string) ReaderFn {
+	return func() (io.Reader, string, error) {
+		source := "byte stream"
+		if len(sources) > 0 {
+			source = formatSources(sources)
+		}
+		return r, source, nil
 	}
 }
 
 // FromString parses a pkg from a raw string value. This is very useful
 // in tests.
 func FromString(s string) ReaderFn {
-	return func() (io.Reader, error) {
-		return strings.NewReader(s), nil
+	return func() (io.Reader, string, error) {
+		return strings.NewReader(s), "string", nil
 	}
+}
+
+var defaultHTTPClient = &http.Client{
+	Timeout: time.Minute,
 }
 
 // FromHTTPRequest parses a pkg from the request body of a HTTP request. This is
 // very useful when using packages that are hosted..
 func FromHTTPRequest(addr string) ReaderFn {
-	return func() (io.Reader, error) {
-		client := http.Client{Timeout: 5 * time.Minute}
-		resp, err := client.Get(addr)
+	return func() (io.Reader, string, error) {
+		resp, err := defaultHTTPClient.Get(normalizeGithubURLToContent(addr))
 		if err != nil {
-			return nil, err
+			return nil, addr, err
 		}
 		defer resp.Body.Close()
 
 		var buf bytes.Buffer
 		if _, err := io.Copy(&buf, resp.Body); err != nil {
-			return nil, err
+			return nil, addr, err
 		}
 
 		if resp.StatusCode/100 != 2 {
-			return nil, fmt.Errorf("bad response: status_code=%d body=%q", resp.StatusCode, strings.TrimSpace(buf.String()))
+			return nil, addr, fmt.Errorf(
+				"bad response: address=%s status_code=%d body=%q",
+				addr, resp.StatusCode, strings.TrimSpace(buf.String()),
+			)
 		}
 
-		return &buf, nil
+		return &buf, addr, nil
 	}
 }
 
-func parseJSON(r io.Reader, opts ...ValidateOptFn) (*Pkg, error) {
+const (
+	githubRawContentHost = "raw.githubusercontent.com"
+	githubHost           = "github.com"
+)
+
+func normalizeGithubURLToContent(addr string) string {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return addr
+	}
+
+	if u.Host == githubHost {
+		switch path.Ext(u.Path) {
+		case ".yaml", ".yml", ".json", ".jsonnet":
+		default:
+			return u.String()
+		}
+
+		parts := strings.Split(u.Path, "/")
+		if len(parts) < 4 {
+			return u.String()
+		}
+		u.Host = githubRawContentHost
+		u.Path = path.Join(append(parts[:3], parts[4:]...)...)
+	}
+
+	return u.String()
+}
+
+func parseJSON(r io.Reader, opts ...ValidateOptFn) (*Template, error) {
 	return parse(json.NewDecoder(r), opts...)
 }
 
-func parseJsonnet(r io.Reader, opts ...ValidateOptFn) (*Pkg, error) {
+func parseJsonnet(r io.Reader, opts ...ValidateOptFn) (*Template, error) {
 	return parse(jsonnet.NewDecoder(r), opts...)
 }
 
-func parseSource(r io.Reader, opts ...ValidateOptFn) (*Pkg, error) {
+func parseSource(r io.Reader, opts ...ValidateOptFn) (*Template, error) {
 	var b []byte
 	if byter, ok := r.(interface{ Bytes() []byte }); ok {
 		b = byter.Bytes()
@@ -171,10 +235,10 @@ func parseSource(r io.Reader, opts ...ValidateOptFn) (*Pkg, error) {
 	}
 }
 
-func parseYAML(r io.Reader, opts ...ValidateOptFn) (*Pkg, error) {
+func parseYAML(r io.Reader, opts ...ValidateOptFn) (*Template, error) {
 	dec := yaml.NewDecoder(r)
 
-	var pkg Pkg
+	var pkg Template
 	for {
 		// forced to use this for loop b/c the yaml dependency does not
 		// decode multi documents.
@@ -200,8 +264,8 @@ type decoder interface {
 	Decode(interface{}) error
 }
 
-func parse(dec decoder, opts ...ValidateOptFn) (*Pkg, error) {
-	var pkg Pkg
+func parse(dec decoder, opts ...ValidateOptFn) (*Template, error) {
+	var pkg Template
 	if err := dec.Decode(&pkg.Objects); err != nil {
 		return nil, err
 	}
@@ -226,14 +290,58 @@ func (k Object) Name() string {
 	return k.Metadata.references(fieldName).String()
 }
 
-// Pkg is the model for a package. The resources are more generic that one might
+// ObjectAssociation is an association for an object. The supported types
+// at this time are KindLabel.
+type ObjectAssociation struct {
+	Kind     Kind
+	MetaName string
+}
+
+// AddAssociations adds an association to the object.
+func (k Object) AddAssociations(associations ...ObjectAssociation) {
+	if len(associations) == 0 {
+		return
+	}
+
+	if k.Spec == nil {
+		k.Spec = make(Resource)
+	}
+
+	existingAss := k.Spec.slcResource(fieldAssociations)
+	for _, ass := range associations {
+		existingAss = append(existingAss, Resource{
+			fieldKind: ass.Kind,
+			fieldName: ass.MetaName,
+		})
+	}
+	sort.Slice(existingAss, func(i, j int) bool {
+		iPkgName, jPkgName := existingAss[i].Name(), existingAss[j].Name()
+		return iPkgName < jPkgName
+	})
+	if existingAss == nil {
+		return
+	}
+
+	k.Spec[fieldAssociations] = existingAss
+}
+
+// SetMetadataName sets the metadata.name field.
+func (k Object) SetMetadataName(name string) {
+	if k.Metadata == nil {
+		k.Metadata = make(Resource)
+	}
+	k.Metadata[fieldName] = name
+}
+
+// Template is the model for a package. The resources are more generic that one might
 // expect at first glance. This was done on purpose. The way json/yaml/toml or
 // w/e scripting you want to use, can have very different ways of parsing. The
 // different parsers are limited for the parsers that do not come from the std
 // lib (looking at you yaml/v2). This allows us to parse it and leave the matching
 // to another power, the graphing of the package is handled within itself.
-type Pkg struct {
+type Template struct {
 	Objects []Object `json:"-" yaml:"-"`
+	sources []string
 
 	mLabels                map[string]*label
 	mBuckets               map[string]*bucket
@@ -249,12 +357,15 @@ type Pkg struct {
 	mEnvVals map[string]string
 	mSecrets map[string]bool
 
-	isVerified bool // dry run has verified pkg resources with existing resources
-	isParsed   bool // indicates the pkg has been parsed and all resources graphed accordingly
+	isParsed bool // indicates the pkg has been parsed and all resources graphed accordingly
 }
 
 // Encode is a helper for encoding the pkg correctly.
-func (p *Pkg) Encode(encoding Encoding) ([]byte, error) {
+func (p *Template) Encode(encoding Encoding) ([]byte, error) {
+	if p == nil {
+		panic("attempted to encode a nil Template")
+	}
+
 	var (
 		buf bytes.Buffer
 		err error
@@ -280,10 +391,16 @@ func (p *Pkg) Encode(encoding Encoding) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func (p *Template) Sources() []string {
+	// note: we prevent the internal field from being changed by enabling access
+	// 		 to the sources via the exported method here.
+	return p.sources
+}
+
 // Summary returns a package Summary that describes all the resources and
 // associations the pkg contains. It is very useful for informing users of
 // the changes that will take place when this pkg would be applied.
-func (p *Pkg) Summary() Summary {
+func (p *Template) Summary() Summary {
 	// ensure zero values for arrays aren't returned, but instead
 	// we always returning an initialized slice.
 	sum := Summary{
@@ -294,15 +411,10 @@ func (p *Pkg) Summary() Summary {
 		NotificationRules:     []SummaryNotificationRule{},
 		Labels:                []SummaryLabel{},
 		MissingEnvs:           p.missingEnvRefs(),
-		MissingSecrets:        []string{},
+		MissingSecrets:        p.missingSecrets(),
 		Tasks:                 []SummaryTask{},
 		TelegrafConfigs:       []SummaryTelegraf{},
 		Variables:             []SummaryVariable{},
-	}
-
-	// only add this after dry run has been completed
-	if p.isVerified {
-		sum.MissingSecrets = p.missingSecrets()
 	}
 
 	for _, b := range p.buckets() {
@@ -346,7 +458,7 @@ func (p *Pkg) Summary() Summary {
 	return sum
 }
 
-func (p *Pkg) applyEnvRefs(envRefs map[string]string) error {
+func (p *Template) applyEnvRefs(envRefs map[string]string) error {
 	if len(envRefs) == 0 {
 		return nil
 	}
@@ -362,17 +474,56 @@ func (p *Pkg) applyEnvRefs(envRefs map[string]string) error {
 	return p.Validate()
 }
 
-func (p *Pkg) applySecrets(secrets map[string]string) {
+func (p *Template) applySecrets(secrets map[string]string) {
 	for k := range secrets {
 		p.mSecrets[k] = true
 	}
 }
 
+// Contains identifies if a pkg contains a given object identified
+// by its kind and metadata.Name (MetaName) field.
+func (p *Template) Contains(k Kind, pkgName string) bool {
+	switch k {
+	case KindBucket:
+		_, ok := p.mBuckets[pkgName]
+		return ok
+	case KindCheck, KindCheckDeadman, KindCheckThreshold:
+		_, ok := p.mChecks[pkgName]
+		return ok
+	case KindLabel:
+		_, ok := p.mLabels[pkgName]
+		return ok
+	case KindNotificationEndpoint,
+		KindNotificationEndpointHTTP,
+		KindNotificationEndpointPagerDuty,
+		KindNotificationEndpointSlack:
+		_, ok := p.mNotificationEndpoints[pkgName]
+		return ok
+	case KindNotificationRule:
+		_, ok := p.mNotificationRules[pkgName]
+		return ok
+	case KindTask:
+		_, ok := p.mTasks[pkgName]
+		return ok
+	case KindTelegraf:
+		_, ok := p.mTelegrafs[pkgName]
+		return ok
+	case KindVariable:
+		_, ok := p.mVariables[pkgName]
+		return ok
+	}
+	return false
+}
+
 // Combine combines pkgs together. Is useful when you want to take multiple disparate pkgs
 // and compile them into one to take advantage of the parser and service guarantees.
-func Combine(pkgs []*Pkg, validationOpts ...ValidateOptFn) (*Pkg, error) {
-	newPkg := new(Pkg)
+func Combine(pkgs []*Template, validationOpts ...ValidateOptFn) (*Template, error) {
+	newPkg := new(Template)
 	for _, p := range pkgs {
+		if len(p.Objects) == 0 {
+			continue
+		}
+		newPkg.sources = append(newPkg.sources, p.sources...)
 		newPkg.Objects = append(newPkg.Objects, p.Objects...)
 	}
 
@@ -408,7 +559,7 @@ func ValidSkipParseError() ValidateOptFn {
 }
 
 // Validate will graph all resources and validate every thing is in a useful form.
-func (p *Pkg) Validate(opts ...ValidateOptFn) error {
+func (p *Template) Validate(opts ...ValidateOptFn) error {
 	opt := &validateOpt{minResources: true}
 	for _, o := range opts {
 		o(opt)
@@ -439,32 +590,32 @@ func (p *Pkg) Validate(opts ...ValidateOptFn) error {
 	return nil
 }
 
-func (p *Pkg) buckets() []*bucket {
+func (p *Template) buckets() []*bucket {
 	buckets := make([]*bucket, 0, len(p.mBuckets))
 	for _, b := range p.mBuckets {
 		buckets = append(buckets, b)
 	}
 
-	sort.Slice(buckets, func(i, j int) bool { return buckets[i].Name() < buckets[j].Name() })
+	sort.Slice(buckets, func(i, j int) bool { return buckets[i].MetaName() < buckets[j].MetaName() })
 
 	return buckets
 }
 
-func (p *Pkg) checks() []*check {
+func (p *Template) checks() []*check {
 	checks := make([]*check, 0, len(p.mChecks))
 	for _, c := range p.mChecks {
 		checks = append(checks, c)
 	}
 
-	sort.Slice(checks, func(i, j int) bool { return checks[i].Name() < checks[j].Name() })
+	sort.Slice(checks, func(i, j int) bool { return checks[i].MetaName() < checks[j].MetaName() })
 
 	return checks
 }
 
-func (p *Pkg) labels() []*label {
+func (p *Template) labels() []*label {
 	labels := make(sortedLabels, 0, len(p.mLabels))
-	for _, b := range p.mLabels {
-		labels = append(labels, b)
+	for _, l := range p.mLabels {
+		labels = append(labels, l)
 	}
 
 	sort.Sort(labels)
@@ -472,16 +623,16 @@ func (p *Pkg) labels() []*label {
 	return labels
 }
 
-func (p *Pkg) dashboards() []*dashboard {
+func (p *Template) dashboards() []*dashboard {
 	dashes := make([]*dashboard, 0, len(p.mDashboards))
 	for _, d := range p.mDashboards {
 		dashes = append(dashes, d)
 	}
-	sort.Slice(dashes, func(i, j int) bool { return dashes[i].Name() < dashes[j].Name() })
+	sort.Slice(dashes, func(i, j int) bool { return dashes[i].MetaName() < dashes[j].MetaName() })
 	return dashes
 }
 
-func (p *Pkg) notificationEndpoints() []*notificationEndpoint {
+func (p *Template) notificationEndpoints() []*notificationEndpoint {
 	endpoints := make([]*notificationEndpoint, 0, len(p.mNotificationEndpoints))
 	for _, e := range p.mNotificationEndpoints {
 		endpoints = append(endpoints, e)
@@ -489,23 +640,23 @@ func (p *Pkg) notificationEndpoints() []*notificationEndpoint {
 	sort.Slice(endpoints, func(i, j int) bool {
 		ei, ej := endpoints[i], endpoints[j]
 		if ei.kind == ej.kind {
-			return ei.Name() < ej.Name()
+			return ei.MetaName() < ej.MetaName()
 		}
 		return ei.kind < ej.kind
 	})
 	return endpoints
 }
 
-func (p *Pkg) notificationRules() []*notificationRule {
+func (p *Template) notificationRules() []*notificationRule {
 	rules := make([]*notificationRule, 0, len(p.mNotificationRules))
 	for _, r := range p.mNotificationRules {
 		rules = append(rules, r)
 	}
-	sort.Slice(rules, func(i, j int) bool { return rules[i].Name() < rules[j].Name() })
+	sort.Slice(rules, func(i, j int) bool { return rules[i].MetaName() < rules[j].MetaName() })
 	return rules
 }
 
-func (p *Pkg) missingEnvRefs() []string {
+func (p *Template) missingEnvRefs() []string {
 	envRefs := make([]string, 0)
 	for envRef, matching := range p.mEnv {
 		if !matching {
@@ -516,7 +667,7 @@ func (p *Pkg) missingEnvRefs() []string {
 	return envRefs
 }
 
-func (p *Pkg) missingSecrets() []string {
+func (p *Template) missingSecrets() []string {
 	secrets := make([]string, 0, len(p.mSecrets))
 	for secret, foundInPlatform := range p.mSecrets {
 		if foundInPlatform {
@@ -527,36 +678,36 @@ func (p *Pkg) missingSecrets() []string {
 	return secrets
 }
 
-func (p *Pkg) tasks() []*task {
+func (p *Template) tasks() []*task {
 	tasks := make([]*task, 0, len(p.mTasks))
 	for _, t := range p.mTasks {
 		tasks = append(tasks, t)
 	}
 
-	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Name() < tasks[j].Name() })
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].MetaName() < tasks[j].MetaName() })
 
 	return tasks
 }
 
-func (p *Pkg) telegrafs() []*telegraf {
+func (p *Template) telegrafs() []*telegraf {
 	teles := make([]*telegraf, 0, len(p.mTelegrafs))
 	for _, t := range p.mTelegrafs {
 		t.config.Name = t.Name()
 		teles = append(teles, t)
 	}
 
-	sort.Slice(teles, func(i, j int) bool { return teles[i].Name() < teles[j].Name() })
+	sort.Slice(teles, func(i, j int) bool { return teles[i].MetaName() < teles[j].MetaName() })
 
 	return teles
 }
 
-func (p *Pkg) variables() []*variable {
+func (p *Template) variables() []*variable {
 	vars := make([]*variable, 0, len(p.mVariables))
 	for _, v := range p.mVariables {
 		vars = append(vars, v)
 	}
 
-	sort.Slice(vars, func(i, j int) bool { return vars[i].Name() < vars[j].Name() })
+	sort.Slice(vars, func(i, j int) bool { return vars[i].MetaName() < vars[j].MetaName() })
 
 	return vars
 }
@@ -565,7 +716,7 @@ func (p *Pkg) variables() []*variable {
 // valid pairs of labels and resources of which all have IDs.
 // If a resource does not exist yet, a label mapping will not
 // be returned for it.
-func (p *Pkg) labelMappings() []SummaryLabelMapping {
+func (p *Template) labelMappings() []SummaryLabelMapping {
 	labels := p.mLabels
 	mappings := make([]SummaryLabelMapping, 0, len(labels))
 	for _, l := range labels {
@@ -593,7 +744,7 @@ func (p *Pkg) labelMappings() []SummaryLabelMapping {
 	return mappings
 }
 
-func (p *Pkg) validResources() error {
+func (p *Template) validResources() error {
 	if len(p.Objects) > 0 {
 		return nil
 	}
@@ -610,7 +761,7 @@ func (p *Pkg) validResources() error {
 	return &err
 }
 
-func (p *Pkg) graphResources() error {
+func (p *Template) graphResources() error {
 	p.mEnv = make(map[string]bool)
 	p.mSecrets = make(map[string]bool)
 
@@ -645,10 +796,10 @@ func (p *Pkg) graphResources() error {
 	return nil
 }
 
-func (p *Pkg) graphBuckets() *parseErr {
+func (p *Template) graphBuckets() *parseErr {
 	p.mBuckets = make(map[string]*bucket)
 	tracker := p.trackNames(true)
-	return p.eachResource(KindBucket, bucketNameMinLength, func(o Object) []validationErr {
+	return p.eachResource(KindBucket, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -672,21 +823,21 @@ func (p *Pkg) graphBuckets() *parseErr {
 
 		failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 			bkt.labels = append(bkt.labels, l)
-			p.mLabels[l.PkgName()].setMapping(bkt, false)
+			p.mLabels[l.MetaName()].setMapping(bkt, false)
 			return nil
 		})
 		sort.Sort(bkt.labels)
 
-		p.mBuckets[bkt.PkgName()] = bkt
+		p.mBuckets[bkt.MetaName()] = bkt
 
 		return append(failures, bkt.valid()...)
 	})
 }
 
-func (p *Pkg) graphLabels() *parseErr {
+func (p *Template) graphLabels() *parseErr {
 	p.mLabels = make(map[string]*label)
 	tracker := p.trackNames(true)
-	return p.eachResource(KindLabel, labelNameMinLength, func(o Object) []validationErr {
+	return p.eachResource(KindLabel, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -697,14 +848,14 @@ func (p *Pkg) graphLabels() *parseErr {
 			Color:       o.Spec.stringShort(fieldLabelColor),
 			Description: o.Spec.stringShort(fieldDescription),
 		}
-		p.mLabels[l.PkgName()] = l
+		p.mLabels[l.MetaName()] = l
 		p.setRefs(l.name, l.displayName)
 
 		return l.valid()
 	})
 }
 
-func (p *Pkg) graphChecks() *parseErr {
+func (p *Template) graphChecks() *parseErr {
 	p.mChecks = make(map[string]*check)
 	tracker := p.trackNames(true)
 
@@ -717,7 +868,7 @@ func (p *Pkg) graphChecks() *parseErr {
 	}
 	var pErr parseErr
 	for _, checkKind := range checkKinds {
-		err := p.eachResource(checkKind.kind, checkNameMinLength, func(o Object) []validationErr {
+		err := p.eachResource(checkKind.kind, func(o Object) []validationErr {
 			ident, errs := tracker(o)
 			if len(errs) > 0 {
 				return errs
@@ -756,12 +907,12 @@ func (p *Pkg) graphChecks() *parseErr {
 
 			failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 				ch.labels = append(ch.labels, l)
-				p.mLabels[l.PkgName()].setMapping(ch, false)
+				p.mLabels[l.MetaName()].setMapping(ch, false)
 				return nil
 			})
 			sort.Sort(ch.labels)
 
-			p.mChecks[ch.PkgName()] = ch
+			p.mChecks[ch.MetaName()] = ch
 			p.setRefs(ch.name, ch.displayName)
 			return append(failures, ch.valid()...)
 		})
@@ -775,10 +926,10 @@ func (p *Pkg) graphChecks() *parseErr {
 	return nil
 }
 
-func (p *Pkg) graphDashboards() *parseErr {
+func (p *Template) graphDashboards() *parseErr {
 	p.mDashboards = make(map[string]*dashboard)
 	tracker := p.trackNames(false)
-	return p.eachResource(KindDashboard, dashboardNameMinLength, func(o Object) []validationErr {
+	return p.eachResource(KindDashboard, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -791,7 +942,7 @@ func (p *Pkg) graphDashboards() *parseErr {
 
 		failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 			dash.labels = append(dash.labels, l)
-			p.mLabels[l.PkgName()].setMapping(dash, false)
+			p.mLabels[l.MetaName()].setMapping(dash, false)
 			return nil
 		})
 		sort.Sort(dash.labels)
@@ -811,20 +962,20 @@ func (p *Pkg) graphDashboards() *parseErr {
 			dash.Charts = append(dash.Charts, ch)
 		}
 
-		p.mDashboards[dash.PkgName()] = dash
+		p.mDashboards[dash.MetaName()] = dash
 		p.setRefs(dash.name, dash.displayName)
 
 		return append(failures, dash.valid()...)
 	})
 }
 
-func (p *Pkg) graphNotificationEndpoints() *parseErr {
+func (p *Template) graphNotificationEndpoints() *parseErr {
 	p.mNotificationEndpoints = make(map[string]*notificationEndpoint)
 	tracker := p.trackNames(true)
 
 	notificationKinds := []struct {
 		kind             Kind
-		notificationKind notificationKind
+		notificationKind notificationEndpointKind
 	}{
 		{
 			kind:             KindNotificationEndpointHTTP,
@@ -842,7 +993,7 @@ func (p *Pkg) graphNotificationEndpoints() *parseErr {
 
 	var pErr parseErr
 	for _, nk := range notificationKinds {
-		err := p.eachResource(nk.kind, 1, func(o Object) []validationErr {
+		err := p.eachResource(nk.kind, func(o Object) []validationErr {
 			ident, errs := tracker(o)
 			if len(errs) > 0 {
 				return errs
@@ -863,7 +1014,7 @@ func (p *Pkg) graphNotificationEndpoints() *parseErr {
 			}
 			failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 				endpoint.labels = append(endpoint.labels, l)
-				p.mLabels[l.PkgName()].setMapping(endpoint, false)
+				p.mLabels[l.MetaName()].setMapping(endpoint, false)
 				return nil
 			})
 			sort.Sort(endpoint.labels)
@@ -877,7 +1028,7 @@ func (p *Pkg) graphNotificationEndpoints() *parseErr {
 				endpoint.username,
 			)
 
-			p.mNotificationEndpoints[endpoint.PkgName()] = endpoint
+			p.mNotificationEndpoints[endpoint.MetaName()] = endpoint
 			return append(failures, endpoint.valid()...)
 		})
 		if err != nil {
@@ -890,10 +1041,10 @@ func (p *Pkg) graphNotificationEndpoints() *parseErr {
 	return nil
 }
 
-func (p *Pkg) graphNotificationRules() *parseErr {
+func (p *Template) graphNotificationRules() *parseErr {
 	p.mNotificationRules = make(map[string]*notificationRule)
 	tracker := p.trackNames(false)
-	return p.eachResource(KindNotificationRule, 1, func(o Object) []validationErr {
+	return p.eachResource(KindNotificationRule, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -925,23 +1076,25 @@ func (p *Pkg) graphNotificationRules() *parseErr {
 			})
 		}
 
+		rule.associatedEndpoint = p.mNotificationEndpoints[rule.endpointName.String()]
+
 		failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 			rule.labels = append(rule.labels, l)
-			p.mLabels[l.PkgName()].setMapping(rule, false)
+			p.mLabels[l.MetaName()].setMapping(rule, false)
 			return nil
 		})
 		sort.Sort(rule.labels)
 
-		p.mNotificationRules[rule.PkgName()] = rule
+		p.mNotificationRules[rule.MetaName()] = rule
 		p.setRefs(rule.name, rule.displayName, rule.endpointName)
 		return append(failures, rule.valid()...)
 	})
 }
 
-func (p *Pkg) graphTasks() *parseErr {
+func (p *Template) graphTasks() *parseErr {
 	p.mTasks = make(map[string]*task)
 	tracker := p.trackNames(false)
-	return p.eachResource(KindTask, 1, func(o Object) []validationErr {
+	return p.eachResource(KindTask, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -959,21 +1112,21 @@ func (p *Pkg) graphTasks() *parseErr {
 
 		failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 			t.labels = append(t.labels, l)
-			p.mLabels[l.PkgName()].setMapping(t, false)
+			p.mLabels[l.MetaName()].setMapping(t, false)
 			return nil
 		})
 		sort.Sort(t.labels)
 
-		p.mTasks[t.PkgName()] = t
+		p.mTasks[t.MetaName()] = t
 		p.setRefs(t.name, t.displayName)
 		return append(failures, t.valid()...)
 	})
 }
 
-func (p *Pkg) graphTelegrafs() *parseErr {
+func (p *Template) graphTelegrafs() *parseErr {
 	p.mTelegrafs = make(map[string]*telegraf)
 	tracker := p.trackNames(false)
-	return p.eachResource(KindTelegraf, 0, func(o Object) []validationErr {
+	return p.eachResource(KindTelegraf, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -987,22 +1140,22 @@ func (p *Pkg) graphTelegrafs() *parseErr {
 
 		failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 			tele.labels = append(tele.labels, l)
-			p.mLabels[l.PkgName()].setMapping(tele, false)
+			p.mLabels[l.MetaName()].setMapping(tele, false)
 			return nil
 		})
 		sort.Sort(tele.labels)
 
-		p.mTelegrafs[tele.PkgName()] = tele
+		p.mTelegrafs[tele.MetaName()] = tele
 		p.setRefs(tele.name, tele.displayName)
 
 		return append(failures, tele.valid()...)
 	})
 }
 
-func (p *Pkg) graphVariables() *parseErr {
+func (p *Template) graphVariables() *parseErr {
 	p.mVariables = make(map[string]*variable)
 	tracker := p.trackNames(true)
-	return p.eachResource(KindVariable, 1, func(o Object) []validationErr {
+	return p.eachResource(KindVariable, func(o Object) []validationErr {
 		ident, errs := tracker(o)
 		if len(errs) > 0 {
 			return errs
@@ -1018,21 +1171,28 @@ func (p *Pkg) graphVariables() *parseErr {
 			MapValues:   o.Spec.mapStrStr(fieldValues),
 		}
 
+		if iSelected, ok := o.Spec[fieldVariableSelected].([]interface{}); ok {
+			for _, res := range iSelected {
+				newVar.selected = append(newVar.selected, ifaceToReference(res))
+			}
+		}
+
 		failures := p.parseNestedLabels(o.Spec, func(l *label) error {
 			newVar.labels = append(newVar.labels, l)
-			p.mLabels[l.PkgName()].setMapping(newVar, false)
+			p.mLabels[l.MetaName()].setMapping(newVar, false)
 			return nil
 		})
 		sort.Sort(newVar.labels)
 
-		p.mVariables[newVar.PkgName()] = newVar
+		p.mVariables[newVar.MetaName()] = newVar
 		p.setRefs(newVar.name, newVar.displayName)
+		p.setRefs(newVar.selected...)
 
 		return append(failures, newVar.valid()...)
 	})
 }
 
-func (p *Pkg) eachResource(resourceKind Kind, minNameLen int, fn func(o Object) []validationErr) *parseErr {
+func (p *Template) eachResource(resourceKind Kind, fn func(o Object) []validationErr) *parseErr {
 	var pErr parseErr
 	for i, k := range p.Objects {
 		if err := k.Kind.OK(); err != nil {
@@ -1066,14 +1226,14 @@ func (p *Pkg) eachResource(resourceKind Kind, minNameLen int, fn func(o Object) 
 			continue
 		}
 
-		if len(k.Name()) < minNameLen {
+		if errs := isDNS1123Label(k.Name()); len(errs) > 0 {
 			pErr.append(resourceErr{
 				Kind: k.Kind.String(),
 				Idx:  intPtr(i),
 				ValidationErrs: []validationErr{
 					objectValidationErr(fieldMetadata, validationErr{
 						Field: fieldName,
-						Msg:   fmt.Sprintf("must be a string of at least %d chars in length", minNameLen),
+						Msg:   fmt.Sprintf("name %q is invalid; %s", k.Name(), strings.Join(errs, "; ")),
 					}),
 				},
 			})
@@ -1108,7 +1268,7 @@ func (p *Pkg) eachResource(resourceKind Kind, minNameLen int, fn func(o Object) 
 	return nil
 }
 
-func (p *Pkg) parseNestedLabels(r Resource, fn func(lb *label) error) []validationErr {
+func (p *Template) parseNestedLabels(r Resource, fn func(lb *label) error) []validationErr {
 	nestedLabels := make(map[string]*label)
 
 	var failures []validationErr
@@ -1130,7 +1290,7 @@ func (p *Pkg) parseNestedLabels(r Resource, fn func(lb *label) error) []validati
 	return failures
 }
 
-func (p *Pkg) parseNestedLabel(nr Resource, fn func(lb *label) error) *validationErr {
+func (p *Template) parseNestedLabel(nr Resource, fn func(lb *label) error) *validationErr {
 	k, err := nr.kind()
 	if err != nil {
 		return &validationErr{
@@ -1165,7 +1325,7 @@ func (p *Pkg) parseNestedLabel(nr Resource, fn func(lb *label) error) *validatio
 	return nil
 }
 
-func (p *Pkg) trackNames(resourceUniqueByName bool) func(Object) (identity, []validationErr) {
+func (p *Template) trackNames(resourceUniqueByName bool) func(Object) (identity, []validationErr) {
 	mPkgNames := make(map[string]bool)
 	uniqNames := make(map[string]bool)
 	return func(o Object) (identity, []validationErr) {
@@ -1204,7 +1364,7 @@ func (p *Pkg) trackNames(resourceUniqueByName bool) func(Object) (identity, []va
 	}
 }
 
-func (p *Pkg) getRefWithKnownEnvs(r Resource, field string) *references {
+func (p *Template) getRefWithKnownEnvs(r Resource, field string) *references {
 	nameRef := r.references(field)
 	if v, ok := p.mEnvVals[nameRef.EnvRef]; ok {
 		nameRef.val = v
@@ -1212,7 +1372,7 @@ func (p *Pkg) getRefWithKnownEnvs(r Resource, field string) *references {
 	return nameRef
 }
 
-func (p *Pkg) setRefs(refs ...*references) {
+func (p *Template) setRefs(refs ...*references) {
 	for _, ref := range refs {
 		if ref.Secret != "" {
 			p.mSecrets[ref.Secret] = false
@@ -1233,26 +1393,28 @@ func parseChart(r Resource) (chart, []validationErr) {
 	}
 
 	c := chart{
-		Kind:        ck,
-		Name:        r.Name(),
-		BinSize:     r.intShort(fieldChartBinSize),
-		BinCount:    r.intShort(fieldChartBinCount),
-		Geom:        r.stringShort(fieldChartGeom),
-		Height:      r.intShort(fieldChartHeight),
-		Note:        r.stringShort(fieldChartNote),
-		NoteOnEmpty: r.boolShort(fieldChartNoteOnEmpty),
-		Position:    r.stringShort(fieldChartPosition),
-		Prefix:      r.stringShort(fieldPrefix),
-		Shade:       r.boolShort(fieldChartShade),
-		Suffix:      r.stringShort(fieldSuffix),
-		TickPrefix:  r.stringShort(fieldChartTickPrefix),
-		TickSuffix:  r.stringShort(fieldChartTickSuffix),
-		TimeFormat:  r.stringShort(fieldChartTimeFormat),
-		Width:       r.intShort(fieldChartWidth),
-		XCol:        r.stringShort(fieldChartXCol),
-		YCol:        r.stringShort(fieldChartYCol),
-		XPos:        r.intShort(fieldChartXPos),
-		YPos:        r.intShort(fieldChartYPos),
+		Kind:           ck,
+		Name:           r.Name(),
+		BinSize:        r.intShort(fieldChartBinSize),
+		BinCount:       r.intShort(fieldChartBinCount),
+		Geom:           r.stringShort(fieldChartGeom),
+		Height:         r.intShort(fieldChartHeight),
+		Note:           r.stringShort(fieldChartNote),
+		NoteOnEmpty:    r.boolShort(fieldChartNoteOnEmpty),
+		Position:       r.stringShort(fieldChartPosition),
+		Prefix:         r.stringShort(fieldPrefix),
+		Shade:          r.boolShort(fieldChartShade),
+		HoverDimension: r.stringShort(fieldChartHoverDimension),
+		Suffix:         r.stringShort(fieldSuffix),
+		TickPrefix:     r.stringShort(fieldChartTickPrefix),
+		TickSuffix:     r.stringShort(fieldChartTickSuffix),
+		TimeFormat:     r.stringShort(fieldChartTimeFormat),
+		Width:          r.intShort(fieldChartWidth),
+		XCol:           r.stringShort(fieldChartXCol),
+		YCol:           r.stringShort(fieldChartYCol),
+		XPos:           r.intShort(fieldChartXPos),
+		YPos:           r.intShort(fieldChartYPos),
+		FillColumns:    r.slcStr(fieldChartFillColumns),
 	}
 
 	if presLeg, ok := r[fieldChartLegend].(legend); ok {
@@ -1348,6 +1510,43 @@ func parseChart(r Resource) (chart, []validationErr) {
 	return c, nil
 }
 
+// dns1123LabelMaxLength is a label's max length in DNS (RFC 1123)
+const dns1123LabelMaxLength int = 63
+
+const dns1123LabelFmt string = "[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+const dns1123LabelErrMsg string = "a DNS-1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character"
+
+var dns1123LabelRegexp = regexp.MustCompile("^" + dns1123LabelFmt + "$")
+
+// isDNS1123Label tests for a string that conforms to the definition of a label in
+// DNS (RFC 1123).
+func isDNS1123Label(value string) []string {
+	var errs []string
+	if len(value) > dns1123LabelMaxLength {
+		errs = append(errs, fmt.Sprintf("must be no more than %d characters", dns1123LabelMaxLength))
+	}
+	if !dns1123LabelRegexp.MatchString(value) {
+		errs = append(errs, regexError(dns1123LabelErrMsg, dns1123LabelFmt, "my-name", "123-abc"))
+	}
+	return errs
+}
+
+// regexError returns a string explanation of a regex validation failure.
+func regexError(msg string, fmt string, examples ...string) string {
+	if len(examples) == 0 {
+		return msg + " (regex used for validation is '" + fmt + "')"
+	}
+	msg += " (e.g. "
+	for i := range examples {
+		if i > 0 {
+			msg += " or "
+		}
+		msg += "'" + examples[i] + "', "
+	}
+	msg += "regex used for validation is '" + fmt + "')"
+	return msg
+}
+
 // Resource is a pkger Resource kind. It can be one of any of
 // available kinds that are supported.
 type Resource map[string]interface{}
@@ -1441,27 +1640,7 @@ func (r Resource) references(key string) *references {
 	if !ok {
 		return &references{}
 	}
-
-	var ref references
-	for _, f := range []string{fieldReferencesSecret, fieldReferencesEnv} {
-		resBody, ok := ifaceToResource(v)
-		if !ok {
-			continue
-		}
-		if keyRes, ok := ifaceToResource(resBody[f]); ok {
-			switch f {
-			case fieldReferencesEnv:
-				ref.EnvRef = keyRes.stringShort(fieldKey)
-			case fieldReferencesSecret:
-				ref.Secret = keyRes.stringShort(fieldKey)
-			}
-		}
-	}
-	if ref.hasValue() {
-		return &ref
-	}
-
-	return &references{val: v}
+	return ifaceToReference(v)
 }
 
 func (r Resource) string(key string) (string, bool) {
@@ -1582,6 +1761,30 @@ func ifaceToResource(i interface{}) (Resource, bool) {
 	return newRes, true
 }
 
+func ifaceToReference(i interface{}) *references {
+	var ref references
+	for _, f := range []string{fieldReferencesSecret, fieldReferencesEnv} {
+		resBody, ok := ifaceToResource(i)
+		if !ok {
+			continue
+		}
+		if keyRes, ok := ifaceToResource(resBody[f]); ok {
+			switch f {
+			case fieldReferencesEnv:
+				ref.EnvRef = keyRes.stringShort(fieldKey)
+				ref.defaultVal = keyRes.stringShort(fieldDefault)
+			case fieldReferencesSecret:
+				ref.Secret = keyRes.stringShort(fieldKey)
+			}
+		}
+	}
+	if ref.hasValue() {
+		return &ref
+	}
+
+	return &references{val: i}
+}
+
 func ifaceToStr(v interface{}) (string, bool) {
 	if v == nil {
 		return "", false
@@ -1646,8 +1849,16 @@ type (
 
 // Error implements the error interface.
 func (e *parseErr) Error() string {
-	var errMsg []string
+	var (
+		errMsg   []string
+		seenErrs = make(map[string]bool)
+	)
 	for _, ve := range append(e.ValidationErrs(), e.rawErrs...) {
+		msg := ve.Error()
+		if seenErrs[msg] {
+			continue
+		}
+		seenErrs[msg] = true
 		errMsg = append(errMsg, ve.Error())
 	}
 

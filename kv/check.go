@@ -3,12 +3,17 @@ package kv
 import (
 	"context"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/notification/check"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/notification/check"
 )
 
 var _ influxdb.CheckService = (*Service)(nil)
+
+var (
+	checkBucket      = []byte("checksv1")
+	checkIndexBucket = []byte("checkindexv1")
+)
 
 func newCheckStore() *IndexStore {
 	const resource = "check"
@@ -32,8 +37,8 @@ func newCheckStore() *IndexStore {
 
 	return &IndexStore{
 		Resource:   resource,
-		EntStore:   NewStoreBase(resource, []byte("checksv1"), EncIDKey, EncBodyJSON, decEndpointEntFn, decValToEntFn),
-		IndexStore: NewOrgNameKeyStore(resource, []byte("checkindexv1"), false),
+		EntStore:   NewStoreBase(resource, checkBucket, EncIDKey, EncBodyJSON, decEndpointEntFn, decValToEntFn),
+		IndexStore: NewOrgNameKeyStore(resource, checkIndexBucket, false),
 	}
 }
 
@@ -269,7 +274,7 @@ func (s *Service) createCheck(ctx context.Context, tx Tx, c influxdb.CheckCreate
 	c.SetCreatedAt(now)
 	c.SetUpdatedAt(now)
 
-	if err := c.Valid(); err != nil {
+	if err := c.Valid(s.FluxLanguageService); err != nil {
 		return err
 	}
 
@@ -291,7 +296,7 @@ func (s *Service) createCheck(ctx context.Context, tx Tx, c influxdb.CheckCreate
 }
 
 func (s *Service) createCheckTask(ctx context.Context, tx Tx, c influxdb.CheckCreate) (*influxdb.Task, error) {
-	script, err := c.GenerateFlux()
+	script, err := c.GenerateFlux(s.FluxLanguageService)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +319,7 @@ func (s *Service) createCheckTask(ctx context.Context, tx Tx, c influxdb.CheckCr
 
 // PutCheck will put a check without setting an ID.
 func (s *Service) PutCheck(ctx context.Context, c influxdb.Check) error {
-	if err := c.Valid(); err != nil {
+	if err := c.Valid(s.FluxLanguageService); err != nil {
 		return err
 	}
 	return s.kv.Update(ctx, func(tx Tx) error {
@@ -393,7 +398,7 @@ func (s *Service) updateCheck(ctx context.Context, tx Tx, id influxdb.ID, chk in
 	}
 
 	chk.SetTaskID(current.GetTaskID())
-	flux, err := chk.GenerateFlux()
+	flux, err := chk.GenerateFlux(s.FluxLanguageService)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +423,7 @@ func (s *Service) updateCheck(ctx context.Context, tx Tx, id influxdb.ID, chk in
 	chk.SetCreatedAt(current.GetCRUDLog().CreatedAt)
 	chk.SetUpdatedAt(s.Now())
 
-	if err := chk.Valid(); err != nil {
+	if err := chk.Valid(s.FluxLanguageService); err != nil {
 		return nil, err
 	}
 
@@ -459,7 +464,7 @@ func (s *Service) patchCheck(ctx context.Context, tx Tx, id influxdb.ID, upd inf
 		tu.Status = strPtr(string(*upd.Status))
 	}
 
-	if err := c.Valid(); err != nil {
+	if err := c.Valid(s.FluxLanguageService); err != nil {
 		return nil, err
 	}
 

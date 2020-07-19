@@ -1,6 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import {Button, EmptyState} from '@influxdata/clockface'
@@ -9,6 +9,7 @@ import CreateLabelOverlay from 'src/labels/components/CreateLabelOverlay'
 import TabbedPageHeader from 'src/shared/components/tabbed_page/TabbedPageHeader'
 import LabelList from 'src/labels/components/LabelList'
 import FilterList from 'src/shared/components/FilterList'
+import ResourceSortDropdown from 'src/shared/components/resource_sort_dropdown/ResourceSortDropdown'
 
 // Actions
 import {createLabel, updateLabel, deleteLabel} from 'src/labels/actions/thunks'
@@ -28,31 +29,21 @@ import {
   Sort,
 } from '@influxdata/clockface'
 import {SortTypes} from 'src/shared/utils/sort'
+import {LabelSortKey} from 'src/shared/components/resource_sort_dropdown/generateSortItems'
 
 // Decorators
 import {ErrorHandling} from 'src/shared/decorators/errors'
 
-interface StateProps {
-  labels: Label[]
-}
-
 interface State {
   searchTerm: string
   isOverlayVisible: boolean
-  sortKey: SortKey
+  sortKey: LabelSortKey
   sortDirection: Sort
   sortType: SortTypes
 }
 
-interface DispatchProps {
-  createLabel: typeof createLabel
-  updateLabel: typeof updateLabel
-  deleteLabel: typeof deleteLabel
-}
-
-type Props = DispatchProps & StateProps
-
-type SortKey = keyof Label
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps
 
 const FilterLabels = FilterList<Label>()
 @ErrorHandling
@@ -79,22 +70,39 @@ class Labels extends PureComponent<Props, State> {
       sortType,
     } = this.state
 
+    const leftHeaderItems = (
+      <>
+        <SearchWidget
+          searchTerm={searchTerm}
+          onSearch={this.handleFilterChange}
+          placeholderText="Filter Labels..."
+        />
+        <ResourceSortDropdown
+          resourceType={ResourceType.Labels}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          sortType={sortType}
+          onSelect={this.handleSort}
+        />
+      </>
+    )
+
+    const rightHeaderItems = (
+      <Button
+        text="Create Label"
+        color={ComponentColor.Primary}
+        icon={IconFont.Plus}
+        onClick={this.handleShowOverlay}
+        testID="button-create"
+      />
+    )
+
     return (
       <>
-        <TabbedPageHeader>
-          <SearchWidget
-            searchTerm={searchTerm}
-            onSearch={this.handleFilterChange}
-            placeholderText="Filter Labels..."
-          />
-          <Button
-            text="Create Label"
-            color={ComponentColor.Primary}
-            icon={IconFont.Plus}
-            onClick={this.handleShowOverlay}
-            testID="button-create"
-          />
-        </TabbedPageHeader>
+        <TabbedPageHeader
+          childrenLeft={leftHeaderItems}
+          childrenRight={rightHeaderItems}
+        />
         <FilterLabels
           list={labels}
           searchKeys={['name', 'properties.description']}
@@ -109,7 +117,6 @@ class Labels extends PureComponent<Props, State> {
               sortKey={sortKey}
               sortDirection={sortDirection}
               sortType={sortType}
-              onClickColumn={this.handleClickColumn}
             />
           )}
         </FilterLabels>
@@ -123,9 +130,12 @@ class Labels extends PureComponent<Props, State> {
     )
   }
 
-  private handleClickColumn = (nextSort: Sort, sortKey: SortKey) => {
-    const sortType = SortTypes.String
-    this.setState({sortKey, sortDirection: nextSort, sortType})
+  private handleSort = (
+    sortKey: LabelSortKey,
+    sortDirection: Sort,
+    sortType: SortTypes
+  ): void => {
+    this.setState({sortKey, sortDirection, sortType})
   }
 
   private handleShowOverlay = (): void => {
@@ -186,18 +196,17 @@ class Labels extends PureComponent<Props, State> {
   }
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const labels = getAll<Label>(state, ResourceType.Labels)
   return {labels}
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   createLabel: createLabel,
   updateLabel: updateLabel,
   deleteLabel: deleteLabel,
 }
 
-export default connect(
-  mstp,
-  mdtp
-)(Labels)
+const connector = connect(mstp, mdtp)
+
+export default connector(Labels)

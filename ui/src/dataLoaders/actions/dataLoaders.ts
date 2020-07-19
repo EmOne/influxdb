@@ -440,9 +440,7 @@ export const generateTelegrafToken = (configID: string) => async (
     const token = {
       name: `${telegraf.name} token`,
       orgID,
-      description: `WRITE ${bucketName} bucket / READ ${
-        telegraf.name
-      } telegraf config`,
+      description: `WRITE ${bucketName} bucket / READ ${telegraf.name} telegraf config`,
       permissions,
     }
 
@@ -621,12 +619,14 @@ export const writeLineProtocolAction = (
     } else if (resp.status === 429) {
       dispatch(notify(readWriteCardinalityLimitReached(resp.data.message)))
       dispatch(setLPStatus(RemoteDataState.Error))
+    } else if (resp.status === 403) {
+      dispatch(setLPStatus(RemoteDataState.Error, resp.data.message))
     } else {
+      dispatch(setLPStatus(RemoteDataState.Error, 'failed to write data'))
       throw new Error(get(resp, 'data.message', 'Failed to write data'))
     }
   } catch (error) {
     console.error(error)
-    dispatch(setLPStatus(RemoteDataState.Error, error.message))
   }
 }
 

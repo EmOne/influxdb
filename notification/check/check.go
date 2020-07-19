@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/influxdata/flux/ast"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/notification"
-	"github.com/influxdata/influxdb/notification/flux"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/notification"
+	"github.com/influxdata/influxdb/v2/notification/flux"
 )
 
 // Base will embed inside a check.
@@ -36,7 +36,7 @@ type Base struct {
 }
 
 // Valid returns err if the check is invalid.
-func (b Base) Valid() error {
+func (b Base) Valid(lang influxdb.FluxLanguageService) error {
 	if !b.ID.Valid() {
 		return &influxdb.Error{
 			Code: influxdb.EInvalid,
@@ -214,7 +214,8 @@ func UnmarshalJSON(b []byte) (influxdb.Check, error) {
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, &influxdb.Error{
-			Msg: "unable to detect the check type from json",
+			Code: influxdb.EInvalid,
+			Msg:  "unable to detect the check type from json",
 		}
 	}
 	convertedFunc, ok := typeToCheck[raw.Type]

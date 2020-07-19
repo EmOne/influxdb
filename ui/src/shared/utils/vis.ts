@@ -113,7 +113,7 @@ export const filterNoisyColumns = (columns: string[], table: Table): string[] =>
     return false
   })
 
-export const parseBounds = (
+export const parseXBounds = (
   bounds: Axis['bounds']
 ): [number, number] | null => {
   if (
@@ -127,6 +127,18 @@ export const parseBounds = (
   }
 
   return [+bounds[0], +bounds[1]]
+}
+
+export const parseYBounds = (
+  bounds: Axis['bounds']
+): [number | null, number | null] | null => {
+  if (!bounds || (!bounds[0] && !bounds[1])) {
+    return null
+  }
+
+  const min = isNaN(parseFloat(bounds[0])) ? null : parseFloat(bounds[0])
+  const max = isNaN(parseFloat(bounds[1])) ? null : parseFloat(bounds[1])
+  return [min, max]
 }
 
 export const extent = (xs: number[]): [number, number] | null => {
@@ -159,7 +171,7 @@ export const checkResultsLength = (giraffeResult: FromFluxResult): boolean => {
 }
 
 export const getNumericColumns = (table: Table): string[] => {
-  const numericColumnKeys = table.columnKeys.filter(k => {
+  const timeColumns = table.columnKeys.filter(k => {
     if (k === 'result' || k === 'table') {
       return false
     }
@@ -169,7 +181,35 @@ export const getNumericColumns = (table: Table): string[] => {
     return columnType === 'time' || columnType === 'number'
   })
 
-  return numericColumnKeys
+  return timeColumns
+}
+
+export const getTimeColumns = (table: Table): string[] => {
+  const timeColumns = table.columnKeys.filter(k => {
+    if (k === 'result' || k === 'table') {
+      return false
+    }
+
+    const columnType = table.getColumnType(k)
+
+    return columnType === 'time'
+  })
+
+  return timeColumns
+}
+
+export const getNumberColumns = (table: Table): string[] => {
+  const numberColumnKeys = table.columnKeys.filter(k => {
+    if (k === 'result' || k === 'table') {
+      return false
+    }
+
+    const columnType = table.getColumnType(k)
+
+    return columnType === 'number'
+  })
+
+  return numberColumnKeys
 }
 
 export const getGroupableColumns = (table: Table): string[] => {
@@ -201,7 +241,7 @@ export const defaultXColumn = (
   table: Table,
   preferredColumnKey?: string
 ): string | null => {
-  const validColumnKeys = getNumericColumns(table)
+  const validColumnKeys = getTimeColumns(table)
 
   if (validColumnKeys.includes(preferredColumnKey)) {
     return preferredColumnKey
@@ -227,7 +267,7 @@ export const defaultYColumn = (
   table: Table,
   preferredColumnKey?: string
 ): string | null => {
-  const validColumnKeys = getNumericColumns(table)
+  const validColumnKeys = getNumberColumns(table)
 
   if (validColumnKeys.includes(preferredColumnKey)) {
     return preferredColumnKey

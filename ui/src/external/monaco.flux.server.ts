@@ -14,11 +14,17 @@ import {
   references,
   definition,
   symbols,
+  formatting,
 } from 'src/external/monaco.flux.messages'
 import {registerCompletion} from 'src/external/monaco.flux.lsp'
 import {AppState, LocalStorage} from 'src/types'
 import {getAllVariables, asAssignment} from 'src/variables/selectors'
 import {buildVarsOption} from 'src/variables/utils/buildVarsOption'
+import {runQuery} from 'src/shared/apis/query'
+import {parseResponse as parse} from 'src/shared/parsing/flux/response'
+import {getOrg} from 'src/organizations/selectors'
+import {fetchAllBuckets} from 'src/buckets/actions/thunks'
+import {event} from 'src/cloud/utils/reporting'
 
 import {store} from 'src/index'
 
@@ -33,36 +39,137 @@ import {
   WorkspaceEdit,
   Location,
   SymbolInformation,
+  TextEdit,
 } from 'monaco-languageclient/lib/services'
 import {Server} from '@influxdata/flux-lsp-browser'
 
 type BucketCallback = () => Promise<string[]>
+type MeasurementsCallback = (bucket: string) => Promise<string[]>
+type TagKeysCallback = (bucket: string) => Promise<string[]>
 
 export interface WASMServer extends Server {
   register_buckets_callback: (BucketCallback) => void
+  register_measurements_callback: (MeasurementsCallback) => void
+  register_tag_keys_callback: (TagKeysCallback) => void
 }
 
 import {format_from_js_file} from '@influxdata/flux'
 
+// NOTE: parses table then select measurements from the _value column
+const parseQueryResponse = response => {
+  const data = (parse(response.csv) || [{data: [{}]}])[0].data
+  return data.slice(1).map(r => r[3])
+}
+
+const queryMeasurements = async (orgID, bucket) => {
+  if (!orgID || orgID === '') {
+    throw new Error('no org is provided')
+  }
+
+  const query = `import "influxdata/influxdb/v1"
+      v1.measurements(bucket:"${bucket}")`
+
+  event('runQuery', {context: 'monaco'})
+  const raw = await runQuery(orgID, query).promise
+  if (raw.type !== 'SUCCESS') {
+    throw new Error('failed to get measurements')
+  }
+
+  return raw
+}
+
+const queryTagKeys = async (orgID, bucket) => {
+  if (!orgID || orgID === '') {
+    throw new Error('no org is provided')
+  }
+
+  const query = `import "influxdata/influxdb/v1"
+      v1.tagKeys(bucket:"${bucket}")`
+
+  event('runQuery', {context: 'monaco'})
+  const raw = await runQuery(orgID, query).promise
+  if (raw.type !== 'SUCCESS') {
+    throw new Error('failed to get tagKeys')
+  }
+
+  return raw
+}
+
+const queryTagValues = async (orgID, bucket, tag) => {
+  if (!orgID || orgID === '') {
+    throw new Error('no org is provided')
+  }
+
+  const query = `import "influxdata/influxdb/v1"
+      v1.tagValues(bucket:"${bucket}", tag: "${tag}")`
+
+  event('runQuery', {context: 'monaco'})
+  const raw = await runQuery(orgID, query).promise
+  if (raw.type !== 'SUCCESS') {
+    throw new Error('failed to get tagKeys')
+  }
+
+  return raw
+}
+
 export class LSPServer {
   private server: WASMServer
   private messageID: number = 0
-  private buckets: string[] = []
   private documentVersions: {[key: string]: number} = {}
   public store: Store<AppState & LocalStorage>
 
   constructor(server: WASMServer, reduxStore = store) {
     this.server = server
     this.server.register_buckets_callback(this.getBuckets)
+    this.server.register_measurements_callback(this.getMeasurements)
+    this.server.register_tag_keys_callback(this.getTagKeys)
+    this.server.register_tag_values_callback(this.getTagValues)
     this.store = reduxStore
   }
 
-  getBuckets = () => {
-    return Promise.resolve(this.buckets)
+  getTagKeys = async bucket => {
+    try {
+      const org = getOrg(this.store.getState())
+      const response = await queryTagKeys(org.id, bucket)
+      return parseQueryResponse(response)
+    } catch (e) {
+      console.error(e)
+      return []
+    }
   }
 
-  updateBuckets(buckets: string[]) {
-    this.buckets = buckets
+  getTagValues = async (bucket, tag) => {
+    try {
+      const org = getOrg(this.store.getState())
+      const response = await queryTagValues(org.id, bucket, tag)
+      return parseQueryResponse(response)
+    } catch (e) {
+      console.error(e)
+      return []
+    }
+  }
+
+  getBuckets = async () => {
+    try {
+      const org = getOrg(this.store.getState())
+      const buckets = await fetchAllBuckets(org.id)
+
+      return Object.values(buckets.entities.buckets).map(b => b.name)
+    } catch (e) {
+      console.error(e)
+      return []
+    }
+  }
+
+  getMeasurements = async (bucket: string) => {
+    try {
+      const org = getOrg(this.store.getState())
+      const response = await queryMeasurements(org.id, bucket)
+      return parseQueryResponse(response)
+    } catch (e) {
+      console.error(e)
+      return []
+    }
   }
 
   initialize() {
@@ -119,6 +226,16 @@ export class LSPServer {
     return response.result
   }
 
+  async formatting(uri): Promise<TextEdit[]> {
+    await this.sendPrelude(uri)
+
+    const response = (await this.send(
+      formatting(this.currentMessageID, uri)
+    )) as {result: TextEdit[]}
+
+    return response.result
+  }
+
   async completionItems(
     uri: string,
     position: Position,
@@ -131,10 +248,7 @@ export class LSPServer {
         completion(
           this.currentMessageID,
           uri,
-          {
-            ...position,
-            line: position.line,
-          },
+          {...position, line: position.line},
           context
         )
       )) as {result?: {items?: []}}
@@ -195,14 +309,12 @@ export class LSPServer {
 
   private async sendPrelude(uri: string): Promise<void> {
     const state = this.store.getState()
-    const contextID =
-      state.currentDashboard.id || state.timeMachines.activeTimeMachineID
 
     // NOTE: we use the AST intermediate format as a means of reducing
     // drift between the parser and the internal representation
-    const variables = getAllVariables(state, contextID)
+    const variables = getAllVariables(state)
       .map(v => asAssignment(v))
-      .filter(v => !(v.init.type === 'StringLiteral' && !v.init.value))
+      .filter(v => !!v)
 
     const file = buildVarsOption(variables)
 

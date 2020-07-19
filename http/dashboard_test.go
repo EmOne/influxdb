@@ -13,12 +13,11 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/influxdata/httprouter"
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/inmem"
-	kithttp "github.com/influxdata/influxdb/kit/transport/http"
-	"github.com/influxdata/influxdb/kv"
-	"github.com/influxdata/influxdb/mock"
-	platformtesting "github.com/influxdata/influxdb/testing"
+	platform "github.com/influxdata/influxdb/v2"
+	kithttp "github.com/influxdata/influxdb/v2/kit/transport/http"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/mock"
+	platformtesting "github.com/influxdata/influxdb/v2/testing"
 	"github.com/yudai/gojsondiff"
 	"github.com/yudai/gojsondiff/formatter"
 	"go.uber.org/zap/zaptest"
@@ -158,7 +157,6 @@ func TestService_handleGetDashboards(t *testing.T) {
         "members": "/api/v2/dashboards/da7aba5e5d81e550/members",
         "owners": "/api/v2/dashboards/da7aba5e5d81e550/owners",
         "cells": "/api/v2/dashboards/da7aba5e5d81e550/cells",
-        "logs": "/api/v2/dashboards/da7aba5e5d81e550/logs",
         "labels": "/api/v2/dashboards/da7aba5e5d81e550/labels"
       }
     },
@@ -186,7 +184,6 @@ func TestService_handleGetDashboards(t *testing.T) {
         "org": "/api/v2/orgs/0000000000000001",
         "members": "/api/v2/dashboards/0ca2204eca2204e0/members",
         "owners": "/api/v2/dashboards/0ca2204eca2204e0/owners",
-        "logs": "/api/v2/dashboards/0ca2204eca2204e0/logs",
         "cells": "/api/v2/dashboards/0ca2204eca2204e0/cells",
         "labels": "/api/v2/dashboards/0ca2204eca2204e0/labels"
       }
@@ -319,7 +316,6 @@ func TestService_handleGetDashboards(t *testing.T) {
         "members": "/api/v2/dashboards/da7aba5e5d81e550/members",
         "owners": "/api/v2/dashboards/da7aba5e5d81e550/owners",
         "cells": "/api/v2/dashboards/da7aba5e5d81e550/cells",
-        "logs": "/api/v2/dashboards/da7aba5e5d81e550/logs",
         "labels": "/api/v2/dashboards/da7aba5e5d81e550/labels"
       }
     }
@@ -464,6 +460,7 @@ func TestService_handleGetDashboard(t *testing.T) {
 		"note": "",
 		"queries": null,
 		"shadeBelow": false,
+		"hoverDimension": "",
 		"showNoteWhenEmpty": false,
 		"timeFormat": "",
 		"type": "xy",
@@ -481,7 +478,6 @@ func TestService_handleGetDashboard(t *testing.T) {
 	     "org": "/api/v2/orgs/0000000000000001",
 	     "members": "/api/v2/dashboards/020f755c3c082000/members",
 	     "owners": "/api/v2/dashboards/020f755c3c082000/owners",
-	     "logs": "/api/v2/dashboards/020f755c3c082000/logs",
 	     "cells": "/api/v2/dashboards/020f755c3c082000/cells",
 	     "labels": "/api/v2/dashboards/020f755c3c082000/labels"
 	}
@@ -562,7 +558,6 @@ func TestService_handleGetDashboard(t *testing.T) {
 	     "org": "/api/v2/orgs/0000000000000001",
 	     "members": "/api/v2/dashboards/020f755c3c082000/members",
 	     "owners": "/api/v2/dashboards/020f755c3c082000/owners",
-	     "logs": "/api/v2/dashboards/020f755c3c082000/logs",
 	     "cells": "/api/v2/dashboards/020f755c3c082000/cells",
 	     "labels": "/api/v2/dashboards/020f755c3c082000/labels"
 	}
@@ -641,7 +636,6 @@ func TestService_handleGetDashboard(t *testing.T) {
 	     "org": "/api/v2/orgs/0000000000000001",
 	     "members": "/api/v2/dashboards/020f755c3c082000/members",
 	     "owners": "/api/v2/dashboards/020f755c3c082000/owners",
-	     "logs": "/api/v2/dashboards/020f755c3c082000/logs",
 	     "cells": "/api/v2/dashboards/020f755c3c082000/cells",
 	     "labels": "/api/v2/dashboards/020f755c3c082000/labels"
 	}
@@ -716,7 +710,6 @@ func TestService_handleGetDashboard(t *testing.T) {
 		    "org": "/api/v2/orgs/0000000000000001",
 		    "members": "/api/v2/dashboards/020f755c3c082000/members",
 		    "owners": "/api/v2/dashboards/020f755c3c082000/owners",
-		    "logs": "/api/v2/dashboards/020f755c3c082000/logs",
 		    "cells": "/api/v2/dashboards/020f755c3c082000/cells",
 		    "labels": "/api/v2/dashboards/020f755c3c082000/labels"
 		  }
@@ -878,7 +871,6 @@ func TestService_handlePostDashboard(t *testing.T) {
 							"org": "/api/v2/orgs/0000000000000001",
 							"members": "/api/v2/dashboards/020f755c3c082000/members",
 							"owners": "/api/v2/dashboards/020f755c3c082000/owners",
-							"logs": "/api/v2/dashboards/020f755c3c082000/logs",
 							"cells": "/api/v2/dashboards/020f755c3c082000/cells",
 							"labels": "/api/v2/dashboards/020f755c3c082000/labels"
 						}
@@ -985,6 +977,7 @@ func TestService_handlePostDashboard(t *testing.T) {
 								"position": "",
 								"queries": null,
 								"shadeBelow": false,
+								"hoverDimension": "",
 								"showNoteWhenEmpty": false,
 								"timeFormat": "",
 								"type": "",
@@ -1003,7 +996,6 @@ func TestService_handlePostDashboard(t *testing.T) {
 						"org": "/api/v2/orgs/0000000000000001",
 						"members": "/api/v2/dashboards/020f755c3c082000/members",
 						"owners": "/api/v2/dashboards/020f755c3c082000/owners",
-						"logs": "/api/v2/dashboards/020f755c3c082000/logs",
 						"cells": "/api/v2/dashboards/020f755c3c082000/cells",
 						"labels": "/api/v2/dashboards/020f755c3c082000/labels"
 					}
@@ -1246,7 +1238,6 @@ func TestService_handlePatchDashboard(t *testing.T) {
 		    "org": "/api/v2/orgs/0000000000000001",
 		    "members": "/api/v2/dashboards/020f755c3c082000/members",
 		    "owners": "/api/v2/dashboards/020f755c3c082000/owners",
-		    "logs": "/api/v2/dashboards/020f755c3c082000/logs",
 		    "cells": "/api/v2/dashboards/020f755c3c082000/cells",
 		    "labels": "/api/v2/dashboards/020f755c3c082000/labels"
 		  }
@@ -1923,9 +1914,5 @@ func jsonEqual(s1, s2 string) (eq bool, diff string, err error) {
 func newInMemKVSVC(t *testing.T) *kv.Service {
 	t.Helper()
 
-	svc := kv.NewService(zaptest.NewLogger(t), inmem.NewKVStore())
-	if err := svc.Initialize(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	return svc
+	return kv.NewService(zaptest.NewLogger(t), NewTestInmemStore(t))
 }

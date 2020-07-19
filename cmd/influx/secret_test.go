@@ -7,8 +7,8 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -85,7 +85,7 @@ func TestCmdSecret(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdSecretBuilder(fakeSVCFn(svc, nil), opt)
+				builder := newCmdSecretBuilder(fakeSVCFn(svc, nil), g, opt)
 				return builder.cmd()
 			}, calls
 		}
@@ -145,7 +145,7 @@ func TestCmdSecret(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdSecretBuilder(fakeSVCFn(svc, nil), opt)
+				builder := newCmdSecretBuilder(fakeSVCFn(svc, nil), g, opt)
 				return builder.cmd()
 			}
 		}
@@ -217,7 +217,7 @@ func TestCmdSecret(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdSecretBuilder(fakeSVCFn(svc, getSctFn), opt)
+				builder := newCmdSecretBuilder(fakeSVCFn(svc, getSctFn), g, opt)
 				return builder.cmd()
 			}
 		}

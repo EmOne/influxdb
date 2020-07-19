@@ -1,6 +1,4 @@
 import {IconFont} from '@influxdata/clockface'
-import {CLOUD_URL, CLOUD_USERS_PATH} from 'src/shared/constants'
-import {isFlagEnabled} from 'src/shared/utils/featureFlag'
 
 export interface NavItemLink {
   type: 'link' | 'href'
@@ -35,18 +33,6 @@ export interface NavItem {
 
 export const generateNavItems = (orgID: string): NavItem[] => {
   const orgPrefix = `/orgs/${orgID}`
-
-  const isMultiUserEnabled = isFlagEnabled('multiUser')
-
-  const quartzMembersHeaderLink: NavItemLink = isMultiUserEnabled
-    ? {
-        type: 'href',
-        location: `${CLOUD_URL}/organizations/${orgID}${CLOUD_USERS_PATH}`,
-      }
-    : {
-        type: 'link',
-        location: `${orgPrefix}/about`,
-      }
 
   return [
     {
@@ -122,68 +108,17 @@ export const generateNavItems = (orgID: string): NavItem[] => {
       activeKeywords: ['data-explorer'],
     },
     {
-      id: 'org',
-      testID: 'nav-item-org',
-      icon: IconFont.UsersTrio,
-      label: 'Organization',
-      shortLabel: 'Org',
+      id: 'notebooks',
+      testID: 'nav-item-notebooks',
+      icon: IconFont.Erlenmeyer,
+      label: 'Flows',
+      featureFlag: 'notebooks',
+      shortLabel: 'Flows',
       link: {
         type: 'link',
-        location: `${orgPrefix}/members`,
+        location: `${orgPrefix}/notebooks`,
       },
-      cloudExclude: true,
-      activeKeywords: ['members', 'about'],
-      menu: [
-        {
-          id: 'members',
-          testID: 'nav-subitem-members',
-          label: 'Members',
-          link: {
-            type: 'link',
-            location: `${orgPrefix}/members`,
-          },
-        },
-        {
-          id: 'about',
-          testID: 'nav-subitem-about',
-          label: 'About',
-          link: {
-            type: 'link',
-            location: `${orgPrefix}/about`,
-          },
-        },
-      ],
-    },
-    {
-      id: 'org-quartz',
-      testID: 'nav-item-quartz-org',
-      icon: IconFont.UsersTrio,
-      label: 'Organization',
-      shortLabel: 'Org',
-      cloudOnly: true,
-      link: quartzMembersHeaderLink,
-      activeKeywords: ['members', 'about'],
-      menu: [
-        {
-          id: 'users',
-          testID: 'nav-subitem-users',
-          label: 'Members',
-          featureFlag: 'multiUser',
-          link: {
-            type: 'href',
-            location: `${CLOUD_URL}/organizations/${orgID}${CLOUD_USERS_PATH}`,
-          },
-        },
-        {
-          id: 'about',
-          testID: 'nav-subitem-about',
-          label: 'About',
-          link: {
-            type: 'link',
-            location: `${orgPrefix}/about`,
-          },
-        },
-      ],
+      activeKeywords: ['notebooks'],
     },
     {
       id: 'dashboards',
@@ -193,7 +128,7 @@ export const generateNavItems = (orgID: string): NavItem[] => {
       shortLabel: 'Boards',
       link: {
         type: 'link',
-        location: `${orgPrefix}/dashboards`,
+        location: `${orgPrefix}/dashboards-list`,
       },
       activeKeywords: ['dashboards'],
     },

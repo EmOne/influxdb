@@ -3,11 +3,12 @@ import {combineReducers} from 'redux'
 // Types
 import {ActionTypes, Action} from 'src/shared/actions/app'
 import {AUTOREFRESH_DEFAULT_INTERVAL} from 'src/shared/constants'
-import {TimeZone, NavBarState, Theme} from 'src/types'
+import {TimeZone, NavBarState, Theme, NotebookMiniMapState} from 'src/types'
 
 export interface AppState {
   ephemeral: {
     inPresentationMode: boolean
+    hasUpdatedTimeRangeInVEO: boolean
   }
   persisted: {
     autoRefresh: number
@@ -15,12 +16,14 @@ export interface AppState {
     timeZone: TimeZone
     navBarState: NavBarState
     theme: Theme
+    notebookMiniMapState: NotebookMiniMapState
   }
 }
 
 const initialState: AppState = {
   ephemeral: {
     inPresentationMode: false,
+    hasUpdatedTimeRangeInVEO: false,
   },
   persisted: {
     theme: 'dark',
@@ -28,6 +31,7 @@ const initialState: AppState = {
     showTemplateControlBar: false,
     timeZone: 'Local',
     navBarState: 'collapsed',
+    notebookMiniMapState: 'collapsed',
   },
 }
 
@@ -52,6 +56,20 @@ const appEphemeralReducer = (
       return {
         ...state,
         inPresentationMode: false,
+      }
+    }
+
+    case ActionTypes.EnableUpdatedTimeRangeInVEO: {
+      return {
+        ...state,
+        hasUpdatedTimeRangeInVEO: true,
+      }
+    }
+
+    case ActionTypes.DisableUpdatedTimeRangeInVEO: {
+      return {
+        ...state,
+        hasUpdatedTimeRangeInVEO: false,
       }
     }
 
@@ -80,6 +98,12 @@ const appPersistedReducer = (
       const {timeZone} = action.payload
 
       return {...state, timeZone}
+    }
+
+    case ActionTypes.SetNotebookMiniMapState: {
+      const notebookMiniMapState = action.notebookMiniMapState
+
+      return {...state, notebookMiniMapState}
     }
 
     case 'SET_NAV_BAR_STATE': {

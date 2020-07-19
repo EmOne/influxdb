@@ -22,7 +22,7 @@ const (
 
 // VariableService describes a service for managing Variables
 type VariableService interface {
-	// FindVariable finds a single variable from the store by its ID
+	// FindVariableByID finds a single variable from the store by its ID
 	FindVariableByID(ctx context.Context, id ID) (*Variable, error)
 
 	// FindVariables returns all variables in the store
@@ -127,6 +127,15 @@ func (m *Variable) Valid() error {
 		return fmt.Errorf("invalid arguments type")
 	}
 
+	inValidNames := [11]string{"and", "import", "not", "return", "option", "test", "empty", "in", "or", "package", "builtin"}
+
+	for x := range inValidNames {
+
+		if m.Name == inValidNames[x] {
+			return fmt.Errorf("%q is a protected variable name", inValidNames[x])
+		}
+	}
+
 	return nil
 }
 
@@ -169,7 +178,7 @@ func (a *VariableArguments) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Decode the polymorphic VariableArguments.Values field into the approriate struct
+	// Decode the polymorphic VariableArguments.Values field into the appropriate struct
 	switch aux.Type {
 	case "constant":
 		values, ok := aux.Values.([]interface{})

@@ -55,7 +55,6 @@ export const getActiveQuery = (state: AppState): DashboardDraftQuery => {
   }
 
   const {draftQueries, activeQueryIndex} = tm
-
   return draftQueries[activeQueryIndex]
 }
 
@@ -65,16 +64,12 @@ export const getActiveQuery = (state: AppState): DashboardDraftQuery => {
 // TODO kill this function
 export const getActiveWindowPeriod = (state: AppState) => {
   const {text} = getActiveQuery(state)
-  const variables = getAllVariables(
-    state,
-    state.timeMachines.activeTimeMachineID
-  ).map(v => asAssignment(v))
-
+  const variables = getAllVariables(state).map(v => asAssignment(v))
   return getWindowPeriod(text, variables)
 }
 
-const getTablesMemoized = memoizeOne(
-  (files: string[]): FluxTable[] => (files ? flatMap(files, parseResponse) : [])
+const getTablesMemoized = memoizeOne((files: string[]): FluxTable[] =>
+  files ? flatMap(files, parseResponse) : []
 )
 
 export const getTables = (state: AppState): FluxTable[] =>
@@ -240,6 +235,8 @@ export const getSaveableView = (state: AppState): QueryView & {id?: string} => {
       queries: draftQueries,
     },
   }
+
+  // TODO: remove all of these conditionals
 
   if (saveableView.properties.type === 'histogram') {
     saveableView = {

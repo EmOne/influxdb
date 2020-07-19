@@ -4,28 +4,33 @@ import {ProtocolToMonacoConverter} from 'monaco-languageclient/lib/monaco-conver
 
 // Components
 import MonacoEditor from 'react-monaco-editor'
-import FluxBucketProvider from 'src/shared/components/FluxBucketProvider'
-import GetResources from 'src/resources/components/GetResources'
 
 // Utils
 import FLUXLANGID from 'src/external/monaco.flux.syntax'
 import THEME_NAME from 'src/external/monaco.flux.theme'
 import loadServer, {LSPServer} from 'src/external/monaco.flux.server'
 import {comments, submit} from 'src/external/monaco.flux.hotkeys'
+import {registerAutogrow} from 'src/external/monaco.autogrow'
+import {isFlagEnabled} from 'src/shared/utils/featureFlag'
 
 // Types
 import {OnChangeScript} from 'src/types/flux'
-import {EditorType, ResourceType} from 'src/types'
+import {EditorType} from 'src/types'
 
 import './FluxMonacoEditor.scss'
 import {editor as monacoEditor} from 'monaco-editor'
 import {Diagnostic} from 'monaco-languageclient/lib/services'
 
 const p2m = new ProtocolToMonacoConverter()
-interface Props {
+
+export interface EditorProps {
   script: string
   onChangeScript: OnChangeScript
   onSubmitScript?: () => void
+  autogrow?: boolean
+}
+
+interface Props extends EditorProps {
   setEditorInstance?: (editor: EditorType) => void
 }
 
@@ -34,6 +39,7 @@ const FluxEditorMonaco: FC<Props> = ({
   onChangeScript,
   onSubmitScript,
   setEditorInstance,
+  autogrow,
 }) => {
   const lspServer = useRef<LSPServer>(null)
   const [editorInst, seteditorInst] = useState<EditorType | null>(null)
@@ -65,12 +71,25 @@ const FluxEditorMonaco: FC<Props> = ({
       }
     })
 
-    editor.focus()
+    if (autogrow) {
+      registerAutogrow(editor)
+    }
 
     try {
       lspServer.current = await loadServer()
       const diagnostics = await lspServer.current.didOpen(uri, script)
       updateDiagnostics(diagnostics)
+
+      if (isFlagEnabled('cursorAtEOF')) {
+        const lines = (script || '').split('\n')
+        editor.setPosition({
+          lineNumber: lines.length,
+          column: lines[lines.length - 1].length + 1,
+        })
+        editor.focus()
+      } else {
+        editor.focus()
+      }
     } catch (e) {
       // TODO: notify user that lsp failed
     }
@@ -89,9 +108,6 @@ const FluxEditorMonaco: FC<Props> = ({
 
   return (
     <div className="flux-editor--monaco" data-testid="flux-editor">
-      <GetResources resources={[ResourceType.Buckets]}>
-        <FluxBucketProvider />
-      </GetResources>
       <MonacoEditor
         language={FLUXLANGID}
         theme={THEME_NAME}

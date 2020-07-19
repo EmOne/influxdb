@@ -13,14 +13,14 @@ const (
 
 // Check represents the information required to generate a periodic check task.
 type Check interface {
-	Valid() error
+	Valid(lang FluxLanguageService) error
 	Type() string
 	ClearPrivateData()
 	SetTaskID(ID)
 	GetTaskID() ID
 	GetOwnerID() ID
 	SetOwnerID(ID)
-	GenerateFlux() (string, error)
+	GenerateFlux(lang FluxLanguageService) (string, error)
 	json.Marshaler
 
 	CRUDLogSetter
@@ -48,12 +48,6 @@ var (
 
 // CheckService represents a service for managing checks.
 type CheckService interface {
-	// UserResourceMappingService must be part of all NotificationRuleStore service,
-	// for create, search, delete.
-	UserResourceMappingService
-	// OrganizationService is needed for search filter
-	OrganizationService
-
 	// FindCheckByID returns a single check by ID.
 	FindCheckByID(ctx context.Context, id ID) (Check, error)
 

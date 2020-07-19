@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -62,8 +62,8 @@ func TestCmdOrg(t *testing.T) {
 				return nil
 			}
 
-			return func(_ *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), opt)
+			return func(f *globalFlags, opt genericCLIOpts) *cobra.Command {
+				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), f, opt)
 				return builder.cmd()
 			}
 		}
@@ -115,7 +115,7 @@ func TestCmdOrg(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), opt)
+				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), g, opt)
 				return builder.cmd()
 			}
 		}
@@ -211,7 +211,7 @@ func TestCmdOrg(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), opt)
+				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), g, opt)
 				return builder.cmd()
 			}, calls
 		}
@@ -309,7 +309,7 @@ func TestCmdOrg(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), opt)
+				builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), g, opt)
 				return builder.cmd()
 			}
 		}
@@ -436,7 +436,7 @@ func TestCmdOrg(t *testing.T) {
 				}
 
 				return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-					builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), opt)
+					builder := newCmdOrgBuilder(fakeOrgSVCFn(svc), g, opt)
 					return builder.cmd()
 				}, calls
 			}
@@ -467,7 +467,7 @@ func TestCmdOrg(t *testing.T) {
 				}
 
 				return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-					builder := newCmdOrgBuilder(fakeOrgUrmSVCsFn(svc, urmSVC), opt)
+					builder := newCmdOrgBuilder(fakeOrgUrmSVCsFn(svc, urmSVC), g, opt)
 					return builder.cmd()
 				}, calls
 			}
@@ -535,7 +535,7 @@ func TestCmdOrg(t *testing.T) {
 				}
 
 				return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-					builder := newCmdOrgBuilder(fakeOrgUrmSVCsFn(svc, urmSVC), opt)
+					builder := newCmdOrgBuilder(fakeOrgUrmSVCsFn(svc, urmSVC), g, opt)
 					return builder.cmd()
 				}, calls
 			}

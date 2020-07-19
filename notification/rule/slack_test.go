@@ -3,11 +3,12 @@ package rule_test
 import (
 	"testing"
 
+	"github.com/influxdata/flux/ast"
 	"github.com/influxdata/flux/parser"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/notification"
-	"github.com/influxdata/influxdb/notification/endpoint"
-	"github.com/influxdata/influxdb/notification/rule"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/notification"
+	"github.com/influxdata/influxdb/v2/notification/endpoint"
+	"github.com/influxdata/influxdb/v2/notification/rule"
 )
 
 func mustDuration(d string) *notification.Duration {
@@ -15,7 +16,7 @@ func mustDuration(d string) *notification.Duration {
 	if err != nil {
 		panic(err)
 	}
-
+	dur.BaseNode = ast.BaseNode{}
 	return (*notification.Duration)(dur)
 }
 

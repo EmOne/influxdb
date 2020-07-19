@@ -7,8 +7,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2/dbrp"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 )
 
 // NewHTTPClient creates a new httpc.Client type. This call sets all
@@ -58,6 +59,7 @@ type Service struct {
 	*TelegrafService
 	*LabelService
 	*SecretService
+	DBRPMappingServiceV2 *dbrp.Client
 }
 
 // NewService returns a service that is an HTTP client to a remote.
@@ -99,6 +101,7 @@ func NewService(httpClient *httpc.Client, addr, token string) (*Service, error) 
 		TelegrafService:             NewTelegrafService(httpClient),
 		LabelService:                &LabelService{Client: httpClient},
 		SecretService:               &SecretService{Client: httpClient},
+		DBRPMappingServiceV2:        dbrp.NewClient(httpClient),
 	}, nil
 }
 
@@ -132,25 +135,35 @@ func (s *SpanTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return s.base.RoundTrip(r)
 }
 
-func httpClient(scheme string, insecure bool) *http.Client {
-	tr := &http.Transport{
+// DefaultTransport wraps http.DefaultTransport in SpanTransport to inject
+// tracing headers into all outgoing requests.
+var DefaultTransport http.RoundTripper = &SpanTransport{base: http.DefaultTransport}
+
+// DefaultTransportInsecure is identical to DefaultTransport, with
+// the exception that tls.Config is configured with InsecureSkipVerify
+// set to true.
+var DefaultTransportInsecure http.RoundTripper = &SpanTransport{
+	base: &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 			DualStack: true,
 		}).DialContext,
+		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-	}
-	if scheme == "https" && insecure {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	return &http.Client{
-		Transport: &SpanTransport{
-			base: tr,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
 		},
+	},
+}
+
+func httpClient(scheme string, insecure bool) *http.Client {
+	if scheme == "https" && insecure {
+		return &http.Client{Transport: DefaultTransportInsecure}
 	}
+	return &http.Client{Transport: DefaultTransport}
 }

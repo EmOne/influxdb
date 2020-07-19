@@ -30,12 +30,14 @@ export interface RunQueryLimitResult {
 export interface RunQueryErrorResult {
   type: 'UNKNOWN_ERROR'
   message: string
+  code?: string
 }
 
 export const runQuery = (
   orgID: string,
   query: string,
-  extern?: File
+  extern?: File,
+  abortController?: AbortController
 ): CancelBox<RunQueryResult> => {
   const url = `${API_BASE_PATH}api/v2/query?${new URLSearchParams({orgID})}`
 
@@ -50,7 +52,7 @@ export const runQuery = (
     dialect: {annotations: ['group', 'datatype', 'default']},
   }
 
-  const controller = new AbortController()
+  const controller = abortController || new AbortController()
 
   const request = fetch(url, {
     method: 'POST',
@@ -138,8 +140,9 @@ const processErrorResponse = async (
     const body = await response.text()
     const json = JSON.parse(body)
     const message = json.message || json.error
+    const code = json.code
 
-    return {type: 'UNKNOWN_ERROR', message}
+    return {type: 'UNKNOWN_ERROR', message, code}
   } catch {
     return {type: 'UNKNOWN_ERROR', message: 'Failed to execute Flux query'}
   }

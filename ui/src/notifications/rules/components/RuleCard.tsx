@@ -1,10 +1,18 @@
 // Libraries
 import React, {FC} from 'react'
-import {connect} from 'react-redux'
-import {withRouter, WithRouterProps} from 'react-router'
+import {connect, ConnectedProps} from 'react-redux'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
 
 // Components
-import {SlideToggle, ComponentSize, ResourceCard} from '@influxdata/clockface'
+import {
+  SlideToggle,
+  ComponentSize,
+  ResourceCard,
+  FlexBox,
+  FlexDirection,
+  AlignItems,
+  JustifyContent,
+} from '@influxdata/clockface'
 import NotificationRuleCardContext from 'src/notifications/rules/components/RuleCardContext'
 import InlineLabels from 'src/shared/components/inlineLabels/InlineLabels'
 import LastRunTaskStatus from 'src/shared/components/lastRunTaskStatus/LastRunTaskStatus'
@@ -31,19 +39,12 @@ import {NotificationRuleDraft, Label, AlertHistoryType} from 'src/types'
 // Utilities
 import {relativeTimestampFormatter} from 'src/shared/utils/relativeTimestampFormatter'
 
-interface DispatchProps {
-  onUpdateRuleProperties: typeof updateRuleProperties
-  deleteNotificationRule: typeof deleteRule
-  onAddRuleLabel: typeof addRuleLabel
-  onRemoveRuleLabel: typeof deleteRuleLabel
-  onCloneRule: typeof cloneRule
-}
-
 interface OwnProps {
   rule: NotificationRuleDraft
 }
 
-type Props = OwnProps & WithRouterProps & DispatchProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = OwnProps & RouteComponentProps<{orgID: string}> & ReduxProps
 
 const RuleCard: FC<Props> = ({
   rule,
@@ -52,8 +53,10 @@ const RuleCard: FC<Props> = ({
   onCloneRule,
   onAddRuleLabel,
   onRemoveRuleLabel,
-  params: {orgID},
-  router,
+  match: {
+    params: {orgID},
+  },
+  history,
 }) => {
   const {
     id,
@@ -88,7 +91,7 @@ const RuleCard: FC<Props> = ({
   }
 
   const onRuleClick = () => {
-    router.push(`/orgs/${orgID}/alerting/rules/${id}/edit`)
+    history.push(`/orgs/${orgID}/alerting/rules/${id}/edit`)
   }
 
   const onView = () => {
@@ -99,7 +102,7 @@ const RuleCard: FC<Props> = ({
       [SEARCH_QUERY_PARAM]: `"notificationRuleID" == "${id}"`,
     })
 
-    router.push(`/orgs/${orgID}/alert-history?${queryParams}`)
+    history.push(`/orgs/${orgID}/alert-history?${queryParams}`)
   }
 
   const handleAddRuleLabel = (label: Label) => {
@@ -114,7 +117,42 @@ const RuleCard: FC<Props> = ({
     <ResourceCard
       key={`rule-id--${id}`}
       testID={`rule-card ${name}`}
-      name={
+      disabled={activeStatus === 'inactive'}
+      direction={FlexDirection.Row}
+      alignItems={AlignItems.Center}
+      margin={ComponentSize.Large}
+      contextMenu={
+        <NotificationRuleCardContext
+          onView={onView}
+          onClone={onClone}
+          onDelete={onDelete}
+        />
+      }
+    >
+      <FlexBox
+        direction={FlexDirection.Column}
+        justifyContent={JustifyContent.Center}
+        margin={ComponentSize.Medium}
+        alignItems={AlignItems.FlexStart}
+      >
+        <SlideToggle
+          active={activeStatus === 'active'}
+          size={ComponentSize.ExtraSmall}
+          onChange={onToggle}
+          testID="rule-card--slide-toggle"
+          style={{flexBasis: '16px'}}
+        />
+        <LastRunTaskStatus
+          key={2}
+          lastRunError={lastRunError}
+          lastRunStatus={lastRunStatus}
+        />
+      </FlexBox>
+      <FlexBox
+        direction={FlexDirection.Column}
+        margin={ComponentSize.Small}
+        alignItems={AlignItems.FlexStart}
+      >
         <ResourceCard.EditableName
           onUpdate={onUpdateName}
           onClick={onRuleClick}
@@ -124,51 +162,26 @@ const RuleCard: FC<Props> = ({
           buttonTestID="rule-card--name-button"
           inputTestID="rule-card--input"
         />
-      }
-      toggle={
-        <SlideToggle
-          active={activeStatus === 'active'}
-          size={ComponentSize.ExtraSmall}
-          onChange={onToggle}
-          testID="rule-card--slide-toggle"
-        />
-      }
-      description={
         <ResourceCard.EditableDescription
           onUpdate={onUpdateDescription}
           description={description}
           placeholder={`Describe ${name}`}
         />
-      }
-      labels={
+        <ResourceCard.Meta>
+          <>Last completed at {latestCompleted}</>
+          <>{relativeTimestampFormatter(rule.updatedAt, 'Last updated ')}</>
+        </ResourceCard.Meta>
         <InlineLabels
           selectedLabelIDs={rule.labels}
           onAddLabel={handleAddRuleLabel}
           onRemoveLabel={handleRemoveRuleLabel}
         />
-      }
-      disabled={activeStatus === 'inactive'}
-      contextMenu={
-        <NotificationRuleCardContext
-          onView={onView}
-          onClone={onClone}
-          onDelete={onDelete}
-        />
-      }
-      metaData={[
-        <>Last completed at {latestCompleted}</>,
-        <>{relativeTimestampFormatter(rule.updatedAt, 'Last updated ')}</>,
-        <LastRunTaskStatus
-          key={2}
-          lastRunError={lastRunError}
-          lastRunStatus={lastRunStatus}
-        />,
-      ]}
-    />
+      </FlexBox>
+    </ResourceCard>
   )
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onUpdateRuleProperties: updateRuleProperties,
   deleteNotificationRule: deleteRule,
   onAddRuleLabel: addRuleLabel,
@@ -176,7 +189,6 @@ const mdtp: DispatchProps = {
   onCloneRule: cloneRule,
 }
 
-export default connect<{}, DispatchProps>(
-  null,
-  mdtp
-)(withRouter(RuleCard))
+const connector = connect(null, mdtp)
+
+export default connector(withRouter(RuleCard))

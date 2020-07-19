@@ -1,6 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Actions
 import {setType} from 'src/timeMachine/actions'
@@ -15,18 +15,11 @@ import {getActiveTimeMachine} from 'src/timeMachine/selectors'
 import {VIS_GRAPHICS} from 'src/timeMachine/constants/visGraphics'
 
 // Types
-import {View, NewView, AppState, ViewType} from 'src/types'
+import {AppState, ViewType} from 'src/types'
 import {ComponentStatus} from 'src/clockface'
 
-interface DispatchProps {
-  onUpdateType: typeof setType
-}
-
-interface StateProps {
-  view: View | NewView
-}
-
-type Props = DispatchProps & StateProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps
 
 class ViewTypeDropdown extends PureComponent<Props> {
   public render() {
@@ -75,22 +68,22 @@ class ViewTypeDropdown extends PureComponent<Props> {
   }
 
   private get dropdownStatus(): ComponentStatus {
-    const {view} = this.props
+    const {viewType} = this.props
 
-    if (view.properties.type === 'check') {
+    if (viewType === 'check') {
       return ComponentStatus.Disabled
     }
     return ComponentStatus.Valid
   }
 
   private get selectedView(): ViewType {
-    const {view} = this.props
+    const {viewType} = this.props
 
-    if (view.properties.type === 'check') {
+    if (viewType === 'check') {
       return 'xy'
     }
 
-    return view.properties.type
+    return viewType
   }
 
   private getVewTypeGraphic = (viewType: ViewType): JSX.Element => {
@@ -107,16 +100,18 @@ class ViewTypeDropdown extends PureComponent<Props> {
   }
 }
 
-const mstp = (state: AppState): StateProps => {
+export {ViewTypeDropdown}
+
+const mstp = (state: AppState) => {
   const {view} = getActiveTimeMachine(state)
 
-  return {view}
+  return {viewType: view.properties.type}
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onUpdateType: setType,
 }
-export default connect<StateProps, DispatchProps, {}>(
-  mstp,
-  mdtp
-)(ViewTypeDropdown)
+
+const connector = connect(mstp, mdtp)
+
+export default connector(ViewTypeDropdown)

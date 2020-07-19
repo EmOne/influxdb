@@ -22,6 +22,9 @@ describe('Checks', () => {
       })
     })
     cy.get('[data-testid="resource-list--body"]', {timeout: PAGE_LOAD_SLA})
+
+    // User can only see all panels at once on large screens
+    cy.getByTestID('alerting-tab--checks').click({force: true})
   })
 
   it('can validate a threshold check', () => {
@@ -77,6 +80,9 @@ describe('Checks', () => {
       cy.getByTestID('save-cell--button').should('be.disabled')
       cy.getByTestID('checkeo--header alerting-tab').click()
       cy.getByTestID('add-threshold-condition-WARN').click()
+      cy.getByTestID('input-field')
+        .clear()
+        .type('0')
       cy.getByTestID('save-cell--button').click()
       cy.getByTestID('check-card').should('have.length', 1)
       cy.getByTestID('notification-error').should('not.exist')
@@ -101,6 +107,25 @@ describe('Checks', () => {
       })
     })
 
+    it('should allow created checks edited checks to persist changes (especially if the value is 0)', () => {
+      const checkName = 'Check it out!'
+      // Selects the check to edit
+      cy.getByTestID('check-card--name').should('have.length', 1)
+      cy.getByTestID('check-card--name').click()
+      // ensures that the check WARN value is set to 0
+      cy.getByTestID('input-field')
+        .should('have.value', '0')
+        .clear()
+        .type('7')
+      // renames the check
+      cy.getByTestID('page-title')
+        .contains('Name this Check')
+        .type(checkName)
+      cy.getByTestID('save-cell--button').click()
+      // checks that the values persisted
+      cy.getByTestID('check-card--name').contains(checkName)
+    })
+
     it('can edit the check card', () => {
       // toggle on / off
       cy.get('.cf-resource-card__disabled').should('not.exist')
@@ -117,6 +142,8 @@ describe('Checks', () => {
       cy.getByTestID('popover--dialog')
         .should('exist')
         .contains('Last Run Status:')
+        // Need to trigger mouseout else the popover obscures the other buttons
+        .trigger('mouseout')
 
       // create a label
       cy.getByTestID('check-card').within(() => {
@@ -131,6 +158,49 @@ describe('Checks', () => {
       // delete the label
       cy.getByTestID(`label--pill--delete ${labelName}`).click({force: true})
       cy.getByTestID('inline-labels--empty').should('exist')
+    })
+  })
+
+  describe('Access alert history page', () => {
+    it('After check creation confirm history page has graph', () => {
+      // creates a check before each iteration
+      // TODO: refactor into a request with other before each
+      cy.getByTestID('create-check').click()
+      cy.getByTestID('create-threshold-check').click()
+      cy.getByTestID(`selector-list ${measurement}`).click()
+      cy.getByTestID('save-cell--button').should('be.disabled')
+      cy.getByTestID(`selector-list ${field}`).click()
+      cy.getByTestID('save-cell--button').should('be.disabled')
+      cy.getByTestID('checkeo--header alerting-tab').click()
+      cy.getByTestID('add-threshold-condition-CRIT').click()
+      cy.getByTestID('input-field')
+        .clear()
+        .type('0')
+      cy.getByTestID('add-threshold-condition-WARN').click()
+      cy.getByTestID('schedule-check')
+        .clear()
+        .type('5s')
+      cy.getByTestID('offset-options')
+        .clear()
+        .type('1s')
+      cy.getByTestID('save-cell--button').click()
+      cy.getByTestID('check-card').should('have.length', 1)
+      cy.getByTestID('notification-error').should('not.exist')
+      cy.getByTestID('context-history-menu').click()
+      cy.getByTestID('context-history-task').click()
+      cy.getByTestID('giraffe-axes').should('be.visible')
+
+      //Clicking the check status input results in dropdown and clicking outside removes dropdown
+      cy.getByTestID('check-status-input').click()
+      cy.getByTestID('check-status-dropdown').should('be.visible')
+      cy.getByTestID('alert-history-title').click()
+      cy.getByTestID('check-status-dropdown').should('not.exist')
+
+      //Minimize the graph by dragging
+      cy.get('.threshold-marker--area.threshold-marker--crit')
+        .trigger('mousedown', {which: 1, pageX: 600, pageY: 100})
+        .trigger('mousemove', {which: 1, pageX: 700, pageY: 100})
+        .trigger('mouseup', {force: true})
     })
   })
 })

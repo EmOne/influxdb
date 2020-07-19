@@ -1,6 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 import {get} from 'lodash'
 
 // Components
@@ -34,22 +34,8 @@ interface OwnProps {
   onClose: () => void
 }
 
-interface StateProps {
-  mode: NoteEditorMode
-  viewsStatus: RemoteDataState
-  cellID?: string
-  dashboardID: string
-}
-
-interface DispatchProps {
-  onCreateNoteCell: typeof createNoteCell
-  onUpdateViewNote: typeof updateViewNote
-  resetNote: typeof resetNoteState
-  onNotify: typeof notify
-  loadNote: typeof loadNote
-}
-
-type Props = OwnProps & StateProps & DispatchProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = OwnProps & ReduxProps
 
 interface State {
   savingStatus: RemoteDataState
@@ -103,7 +89,7 @@ class NoteEditorOverlay extends PureComponent<Props, State> {
     }
 
     return (
-      <Overlay.Container maxWidth={900}>
+      <Overlay.Container maxWidth={900} testID="note-editor--overlay">
         <Overlay.Header
           title={this.overlayTitle}
           onDismiss={this.handleDismiss}
@@ -117,12 +103,17 @@ class NoteEditorOverlay extends PureComponent<Props, State> {
           </SpinnerContainer>
         </Overlay.Body>
         <Overlay.Footer>
-          <Button text="Cancel" onClick={this.handleDismiss} />
+          <Button
+            text="Cancel"
+            onClick={this.handleDismiss}
+            testID="cancel-note--button"
+          />
           <Button
             text="Save"
             color={ComponentColor.Success}
             status={this.saveButtonStatus}
             onClick={this.handleSave}
+            testID="save-note--button"
           />
         </Overlay.Footer>
       </Overlay.Container>
@@ -185,7 +176,7 @@ class NoteEditorOverlay extends PureComponent<Props, State> {
   }
 }
 
-const mstp = ({noteEditor, resources, overlays}: AppState): StateProps => {
+const mstp = ({noteEditor, resources, overlays}: AppState) => {
   const {params} = overlays
   const {mode} = noteEditor
   const {status} = resources.views
@@ -204,7 +195,6 @@ const mdtp = {
   loadNote,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(NoteEditorOverlay)
+const connector = connect(mstp, mdtp)
+
+export default connector(NoteEditorOverlay)

@@ -234,14 +234,6 @@ export const timeMachineReducer = (
       return {...state, view}
     }
 
-    case 'SET_TIME_RANGE': {
-      return produce(state, draftState => {
-        draftState.timeRange = action.payload.timeRange
-
-        buildAllQueries(draftState)
-      })
-    }
-
     case 'SET_AUTO_REFRESH': {
       return produce(state, draftState => {
         draftState.autoRefresh = action.payload.autoRefresh
@@ -260,7 +252,6 @@ export const timeMachineReducer = (
     case 'SET_ACTIVE_QUERY_TEXT': {
       const {text} = action.payload
       const draftQueries = [...state.draftQueries]
-
       draftQueries[state.activeQueryIndex] = {
         ...draftQueries[state.activeQueryIndex],
         text,
@@ -282,7 +273,7 @@ export const timeMachineReducer = (
         draftState.queryResults.status = status
         draftState.queryResults.errorMessage = errorMessage
 
-        if (files) {
+        if (files && files.length) {
           if (
             state.view &&
             state.view.properties &&
@@ -565,6 +556,12 @@ export const timeMachineReducer = (
       return setViewProperties(state, {shadeBelow})
     }
 
+    case 'SET_HOVER_DIMENSION': {
+      const {hoverDimension} = action.payload
+
+      return setViewProperties(state, {hoverDimension})
+    }
+
     case 'SET_BACKGROUND_THRESHOLD_COLORING': {
       const viewColors = state.view.properties.colors as Color[]
 
@@ -772,6 +769,7 @@ export const timeMachineReducer = (
         tags[index].keysStatus = status
 
         if (status === RemoteDataState.Loading) {
+          tags[index].valuesStatus = RemoteDataState.NotStarted
           for (let i = index + 1; i < tags.length; i++) {
             tags[i].keysStatus = RemoteDataState.NotStarted
           }

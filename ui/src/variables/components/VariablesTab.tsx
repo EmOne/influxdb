@@ -1,8 +1,7 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import _ from 'lodash'
-import {connect} from 'react-redux'
-import {withRouter, WithRouterProps} from 'react-router'
+import {connect, ConnectedProps} from 'react-redux'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
 
 // Utils
 import {deleteVariable} from 'src/variables/actions/thunks'
@@ -15,6 +14,7 @@ import TabbedPageHeader from 'src/shared/components/tabbed_page/TabbedPageHeader
 import VariableList from 'src/variables/components/VariableList'
 import Filter from 'src/shared/components/FilterList'
 import AddResourceDropdown from 'src/shared/components/AddResourceDropdown'
+import ResourceSortDropdown from 'src/shared/components/resource_sort_dropdown/ResourceSortDropdown'
 import GetResources from 'src/resources/components/GetResources'
 import {Sort} from '@influxdata/clockface'
 
@@ -22,26 +22,18 @@ import {Sort} from '@influxdata/clockface'
 import {AppState, OverlayState, ResourceType, Variable} from 'src/types'
 import {ComponentSize} from '@influxdata/clockface'
 import {SortTypes} from 'src/shared/utils/sort'
+import {VariableSortKey} from 'src/shared/components/resource_sort_dropdown/generateSortItems'
 
-interface StateProps {
-  variables: Variable[]
-}
-
-interface DispatchProps {
-  onDeleteVariable: typeof deleteVariable
-}
-
-type Props = StateProps & DispatchProps & WithRouterProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = RouteComponentProps<{orgID: string}> & ReduxProps
 
 interface State {
   searchTerm: string
   importOverlayState: OverlayState
-  sortKey: SortKey
+  sortKey: VariableSortKey
   sortDirection: Sort
   sortType: SortTypes
 }
-
-type SortKey = keyof Variable
 
 const FilterList = Filter<Variable>()
 
@@ -58,20 +50,37 @@ class VariablesTab extends PureComponent<Props, State> {
     const {variables} = this.props
     const {searchTerm, sortKey, sortDirection, sortType} = this.state
 
+    const leftHeaderItems = (
+      <>
+        <SearchWidget
+          placeholderText="Filter variables..."
+          searchTerm={searchTerm}
+          onSearch={this.handleFilterChange}
+        />
+        <ResourceSortDropdown
+          onSelect={this.handleSort}
+          resourceType={ResourceType.Variables}
+          sortDirection={sortDirection}
+          sortKey={sortKey}
+          sortType={sortType}
+        />
+      </>
+    )
+
+    const rightHeaderItems = (
+      <AddResourceDropdown
+        resourceName="Variable"
+        onSelectImport={this.handleOpenImportOverlay}
+        onSelectNew={this.handleOpenCreateOverlay}
+      />
+    )
+
     return (
       <>
-        <TabbedPageHeader>
-          <SearchWidget
-            placeholderText="Filter variables..."
-            searchTerm={searchTerm}
-            onSearch={this.handleFilterChange}
-          />
-          <AddResourceDropdown
-            resourceName="Variable"
-            onSelectImport={this.handleOpenImportOverlay}
-            onSelectNew={this.handleOpenCreateOverlay}
-          />
-        </TabbedPageHeader>
+        <TabbedPageHeader
+          childrenLeft={leftHeaderItems}
+          childrenRight={rightHeaderItems}
+        />
         <GetResources resources={[ResourceType.Labels]}>
           <FilterList
             searchTerm={searchTerm}
@@ -87,7 +96,6 @@ class VariablesTab extends PureComponent<Props, State> {
                 sortKey={sortKey}
                 sortDirection={sortDirection}
                 sortType={sortType}
-                onClickColumn={this.handleClickColumn}
               />
             )}
           </FilterList>
@@ -96,9 +104,12 @@ class VariablesTab extends PureComponent<Props, State> {
     )
   }
 
-  private handleClickColumn = (nextSort: Sort, sortKey: SortKey) => {
-    const sortType = SortTypes.String
-    this.setState({sortKey, sortDirection: nextSort, sortType})
+  private handleSort = (
+    sortKey: VariableSortKey,
+    sortDirection: Sort,
+    sortType: SortTypes
+  ): void => {
+    this.setState({sortKey, sortDirection, sortType})
   }
 
   private get emptyState(): JSX.Element {
@@ -135,21 +146,15 @@ class VariablesTab extends PureComponent<Props, State> {
   }
 
   private handleOpenImportOverlay = (): void => {
-    const {
-      router,
-      params: {orgID},
-    } = this.props
+    const {history, match} = this.props
 
-    router.push(`/orgs/${orgID}/settings/variables/import`)
+    history.push(`/orgs/${match.params.orgID}/settings/variables/import`)
   }
 
   private handleOpenCreateOverlay = (): void => {
-    const {
-      router,
-      params: {orgID},
-    } = this.props
+    const {history, match} = this.props
 
-    router.push(`/orgs/${orgID}/settings/variables/new`)
+    history.push(`/orgs/${match.params.orgID}/settings/variables/new`)
   }
 
   private handleDeleteVariable = (variable: Variable): void => {
@@ -158,17 +163,16 @@ class VariablesTab extends PureComponent<Props, State> {
   }
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const variables = getVariables(state)
 
   return {variables}
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onDeleteVariable: deleteVariable,
 }
 
-export default connect<StateProps, DispatchProps, {}>(
-  mstp,
-  mdtp
-)(withRouter<{}>(VariablesTab))
+const connector = connect(mstp, mdtp)
+
+export default connector(withRouter(VariablesTab))

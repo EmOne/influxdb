@@ -8,6 +8,22 @@
 
 ## Quickstart
 
+## Docker
+
+We've provided `make` targets that provide an "interactive" development experience using Docker.
+
+
+```console
+make dshell
+```
+
+This command builds a development container image and puts you inside a container with all the tooling you require to develop and build InfluxDB.
+You can use the "Local" instructions once inside this container and work on the premise that you have everything installed.
+
+Other container runtimes should work, but we've only tested with Docker and Podman (`alias docker=podman`).
+
+## Local
+
 Assuming you have Go 1.13, Node LTS, and yarn installed, and some means of ingesting data locally (e.g. telegraf):
 
 You'll need two terminal tabs to run influxdb from source: one to run the go application server, the other to run the development server that will listen for front-end changes, rebuild the bundle, serve the new bundle, then reload your webpage for you.
@@ -77,7 +93,7 @@ Your browser should reload the page after you save your changes (sometimes this 
 
 ## Getting some Graphs
 
-If you haven't set up telegraf yet, [following the official telegraf documentation](https://v2.docs.influxdata.com/v2.0/write-data/use-telegraf/) is the quickest and most straightforward and hassle-free way of getting some data into your local instance. The documentation there will be kept fresher and and more current than this tutorial.
+If you haven't set up telegraf yet, [following the official telegraf documentation](https://v2.docs.influxdata.com/v2.0/write-data/no-code/use-telegraf/) is the quickest and most straightforward and hassle-free way of getting some data into your local instance. The documentation there will be kept fresher and and more current than this tutorial.
 
 Learning how to input Line protocol data is a great tool if you need to debug with arbitrary adhoc data. Check out a quick intro to the [Line protocol](https://v2.docs.influxdata.com/v2.0/write-data/#what-you-ll-need), and learn how to [input it via the ui.](https://v2.docs.influxdata.com/v2.0/write-data/#user-interface) *Since we're running `influxd` locally, you can skip step 1.*
 

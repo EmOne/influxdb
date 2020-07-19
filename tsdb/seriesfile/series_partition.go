@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/logger"
-	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/pkg/fs"
-	"github.com/influxdata/influxdb/pkg/rhh"
-	"github.com/influxdata/influxdb/tsdb"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/logger"
+	"github.com/influxdata/influxdb/v2/models"
+	"github.com/influxdata/influxdb/v2/pkg/fs"
+	"github.com/influxdata/influxdb/v2/pkg/rhh"
+	"github.com/influxdata/influxdb/v2/tsdb"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -906,7 +906,7 @@ func (c *SeriesPartitionCompactor) insertKeyIDMap(dst []byte, capacity int64, se
 			binary.BigEndian.PutUint64(elem[SeriesOffsetSize:], id.RawID())
 
 			// Swap with values in that position.
-			hash, key, offset, id = elemHash, elemKey, elemOffset, elemID
+			offset, id = elemOffset, elemID
 
 			// Update current distance.
 			dist = d
@@ -943,7 +943,7 @@ func (c *SeriesPartitionCompactor) insertIDOffsetMap(dst []byte, capacity int64,
 			binary.BigEndian.PutUint64(elem[SeriesIDSize:], uint64(offset))
 
 			// Swap with values in that position.
-			hash, id, offset = elemHash, elemID, elemOffset
+			id, offset = elemID, elemOffset
 
 			// Update current distance.
 			dist = d

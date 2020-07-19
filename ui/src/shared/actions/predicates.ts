@@ -9,7 +9,7 @@ import {runQuery} from 'src/shared/apis/query'
 import {getWindowVars} from 'src/variables/utils/getWindowVars'
 import {buildVarsOption} from 'src/variables/utils/buildVarsOption'
 import {getVariables, asAssignment} from 'src/variables/selectors'
-import {checkQueryResult} from 'src/shared/utils/checkQueryResult'
+import fromFlux from 'src/shared/utils/fromFlux'
 import {getOrg} from 'src/organizations/selectors'
 
 // Actions
@@ -227,10 +227,9 @@ export const executePreviewQuery = (query: string) => async (
     // which means we have to drag around all this asAssignment
     // garbage to be able to run a query instead of just being able
     // to executeQuery as normal
-    const variableAssignments = getVariables(
-      state,
-      state.timeMachines.activeTimeMachineID
-    ).map(v => asAssignment(v))
+    const variableAssignments = getVariables(state)
+      .map(v => asAssignment(v))
+      .filter(v => !!v)
     const windowVars = getWindowVars(query, variableAssignments)
     const extern = buildVarsOption([...variableAssignments, ...windowVars])
     const result = await runQuery(orgID, query, extern).promise
@@ -249,7 +248,10 @@ export const executePreviewQuery = (query: string) => async (
       dispatch(notify(resultTooLarge(result.bytesRead)))
     }
 
-    checkQueryResult(result.csv)
+    // TODO: this is just here for validation. since we are already eating
+    // the cost of parsing the results, we should store the output instead
+    // of the raw input
+    fromFlux(result.csv)
 
     const files = [result.csv]
     dispatch(setFiles(files))

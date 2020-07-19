@@ -2,10 +2,9 @@ package tenant
 
 import (
 	"context"
-	"errors"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
 )
 
 // FindBucketByID returns a single bucket by ID.
@@ -49,6 +48,14 @@ func (s *Service) FindBucketByName(ctx context.Context, orgID influxdb.ID, name 
 
 // FindBucket returns the first bucket that matches filter.
 func (s *Service) FindBucket(ctx context.Context, filter influxdb.BucketFilter) (*influxdb.Bucket, error) {
+	if filter.ID != nil {
+		return s.FindBucketByID(ctx, *filter.ID)
+	}
+
+	if filter.Name != nil && filter.OrganizationID != nil {
+		return s.FindBucketByName(ctx, *filter.OrganizationID, *filter.Name)
+	}
+
 	buckets, _, err := s.FindBuckets(ctx, filter, influxdb.FindOptions{
 		Limit: 1,
 	})
@@ -57,8 +64,8 @@ func (s *Service) FindBucket(ctx context.Context, filter influxdb.BucketFilter) 
 		return nil, err
 	}
 
-	if len(buckets) != 1 {
-		return nil, errors.New("unkown error")
+	if len(buckets) < 1 {
+		return nil, ErrBucketNotFound
 	}
 
 	return buckets[0], nil
@@ -75,14 +82,6 @@ func (s *Service) FindBuckets(ctx context.Context, filter influxdb.BucketFilter,
 		return []*influxdb.Bucket{b}, 1, nil
 	}
 
-	if filter.Name != nil && filter.OrganizationID != nil {
-		b, err := s.FindBucketByName(ctx, *filter.OrganizationID, *filter.Name)
-		if err != nil {
-			return nil, 0, err
-		}
-		return []*influxdb.Bucket{b}, 1, nil
-	}
-
 	var buckets []*influxdb.Bucket
 	err := s.store.View(ctx, func(tx kv.Tx) error {
 		if filter.OrganizationID == nil && filter.Org != nil {
@@ -91,6 +90,15 @@ func (s *Service) FindBuckets(ctx context.Context, filter influxdb.BucketFilter,
 				return err
 			}
 			filter.OrganizationID = &org.ID
+		}
+
+		if filter.Name != nil && filter.OrganizationID != nil {
+			b, err := s.store.GetBucketByName(ctx, tx, *filter.OrganizationID, *filter.Name)
+			if err != nil {
+				return err
+			}
+			buckets = []*influxdb.Bucket{b}
+			return nil
 		}
 
 		bs, err := s.store.ListBuckets(ctx, tx, BucketFilter{
@@ -108,6 +116,18 @@ func (s *Service) FindBuckets(ctx context.Context, filter influxdb.BucketFilter,
 		return nil, 0, err
 	}
 
+	if len(opt) > 0 && len(buckets) >= opt[0].Limit {
+		// if we have reached the limit we will not add system buckets
+		return buckets, len(buckets), nil
+	}
+
+	// if a name is provided dont fill in system buckets
+	if filter.Name != nil {
+		return buckets, len(buckets), nil
+	}
+
+	// NOTE: this is a remnant of the old system.
+	// There are org that do not have system buckets stored, but still need to be displayed.
 	needsSystemBuckets := true
 	for _, b := range buckets {
 		if b.Type == influxdb.BucketTypeSystem {
@@ -154,12 +174,7 @@ func (s *Service) CreateBucket(ctx context.Context, b *influxdb.Bucket) error {
 			return err
 		}
 
-		err := s.store.CreateBucket(ctx, tx, b)
-		if err != nil {
-			return err
-		}
-
-		return s.addOrgRelationToResource(ctx, tx, b.OrgID, b.ID, influxdb.BucketsResourceType)
+		return s.store.CreateBucket(ctx, tx, b)
 	})
 }
 

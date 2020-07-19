@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
 )
 
 var (
@@ -104,7 +104,7 @@ func (s *Store) GetOrgByName(ctx context.Context, tx kv.Tx, n string) (*influxdb
 
 	var id influxdb.ID
 	if err := id.Decode(uid); err != nil {
-		return nil, ErrCorruptID(err)
+		return nil, influxdb.ErrCorruptID(err)
 	}
 	return s.GetOrg(ctx, tx, id)
 }
@@ -212,7 +212,7 @@ func (s *Store) UpdateOrg(ctx context.Context, tx kv.Tx, id influxdb.ID, upd inf
 	}
 
 	u.SetUpdatedAt(time.Now())
-	if upd.Name != nil {
+	if upd.Name != nil && u.Name != *upd.Name {
 		if err := s.uniqueOrgName(ctx, tx, *upd.Name); err != nil {
 			return nil, err
 		}

@@ -3,11 +3,15 @@ import {BASE_PATH, API_BASE_PATH} from 'src/shared/constants'
 
 export const getBrowserBasepath = () => {
   const rootNode = getRootNode()
+  if (!rootNode) {
+    return ''
+  }
+
   return rootNode.getAttribute('data-basepath') || ''
 }
 
 export const getBasepath = () => {
-  if (BASE_PATH === '/') {
+  if (!BASE_PATH || BASE_PATH === '/') {
     return ''
   }
 
@@ -15,7 +19,7 @@ export const getBasepath = () => {
 }
 
 export const getAPIBasepath = () => {
-  if (API_BASE_PATH === '/') {
+  if (!API_BASE_PATH || API_BASE_PATH === '/') {
     return ''
   }
 

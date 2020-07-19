@@ -1,6 +1,6 @@
 // Libraries
 import {Dispatch} from 'react'
-import {push} from 'react-router-redux'
+import {push, RouterAction} from 'connected-react-router'
 import {normalize} from 'normalizr'
 
 // Constants
@@ -19,6 +19,7 @@ import {createView} from 'src/views/helpers'
 import {getOrg} from 'src/organizations/selectors'
 import {toPostCheck, builderToPostCheck} from 'src/checks/utils'
 import {getAll, getStatus} from 'src/resources/selectors'
+import {getErrorMessage} from 'src/utils/api'
 
 // Actions
 import {
@@ -59,6 +60,8 @@ import {
 } from 'src/types'
 import {labelSchema} from 'src/schemas/labels'
 
+import {LIMIT} from 'src/resources/constants'
+
 export const getChecks = () => async (
   dispatch: Dispatch<
     Action | NotificationAction | ReturnType<typeof checkChecksLimits>
@@ -72,7 +75,9 @@ export const getChecks = () => async (
     }
     const {id: orgID} = getOrg(state)
 
-    const resp = await api.getChecks({query: {orgID}})
+    // bump the limit up to the max. see idpe 6592
+    // TODO: https://github.com/influxdata/influxdb/issues/17541
+    const resp = await api.getChecks({query: {orgID, limit: LIMIT}})
 
     if (resp.status !== 200) {
       throw new Error(resp.data.message)
@@ -94,7 +99,7 @@ export const getChecks = () => async (
 
 export const getCheckForTimeMachine = (checkID: string) => async (
   dispatch: Dispatch<
-    TimeMachineAction | NotificationAction | AlertBuilderAction
+    TimeMachineAction | NotificationAction | AlertBuilderAction | RouterAction
   >,
   getState: GetState
 ) => {
@@ -110,9 +115,15 @@ export const getCheckForTimeMachine = (checkID: string) => async (
 
     const check = resp.data
 
-    const view = createView<CheckViewProperties>(check.type)
+    const normCheck = normalize<Check, CheckEntities, string>(
+      resp.data,
+      checkSchema
+    )
+    const builderCheck = normCheck.entities.checks[normCheck.result]
 
-    view.properties.queries = [check.query]
+    const view = createView<CheckViewProperties>(builderCheck.type)
+
+    view.properties.queries = [builderCheck.query]
 
     dispatch(
       setActiveTimeMachine('alerting', {
@@ -120,13 +131,6 @@ export const getCheckForTimeMachine = (checkID: string) => async (
         activeTab: check.type === 'custom' ? 'customCheckQuery' : 'alerting',
       })
     )
-
-    const normCheck = normalize<Check, CheckEntities, string>(
-      resp.data,
-      checkSchema
-    )
-
-    const builderCheck = normCheck.entities.checks[normCheck.result]
 
     dispatch(setAlertBuilderCheck(builderCheck))
   } catch (error) {
@@ -144,20 +148,17 @@ type SendToTimeMachineAction =
   | NotificationAction
 
 export const createCheckFromTimeMachine = () => async (
-  dispatch: Dispatch<Action | SendToTimeMachineAction>,
+  dispatch: Dispatch<Action | SendToTimeMachineAction | RouterAction>,
   getState: GetState
 ): Promise<void> => {
+  const rename = 'Please rename the check before saving'
   try {
     const state = getState()
     const check = builderToPostCheck(state)
     const resp = await api.postCheck({data: check})
     if (resp.status !== 201) {
       if (resp.data.code.includes('conflict')) {
-        throw new Error(
-          `A check named ${
-            check.name
-          } already exists. Please rename the check before saving`
-        )
+        throw new Error(`A check named ${check.name} already exists. ${rename}`)
       }
       throw new Error(resp.data.message)
     }
@@ -174,16 +175,19 @@ export const createCheckFromTimeMachine = () => async (
     dispatch(resetAlertBuilder())
   } catch (error) {
     console.error(error)
-    dispatch(notify(copy.createCheckFailed(error.message)))
-    reportError(error, {
-      context: {state: getState()},
-      name: 'saveCheckFromTimeMachine function',
-    })
+    const message = getErrorMessage(error)
+    dispatch(notify(copy.createCheckFailed(message)))
+    if (!message.includes(rename)) {
+      reportError(error, {
+        context: {state: getState()},
+        name: 'saveCheckFromTimeMachine function',
+      })
+    }
   }
 }
 
 export const updateCheckFromTimeMachine = () => async (
-  dispatch: Dispatch<Action | SendToTimeMachineAction>,
+  dispatch: Dispatch<Action | SendToTimeMachineAction | RouterAction>,
   getState: GetState
 ) => {
   const state = getState()

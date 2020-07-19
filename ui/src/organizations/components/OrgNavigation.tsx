@@ -1,7 +1,7 @@
 // Libraries
 import React, {PureComponent} from 'react'
 import _ from 'lodash'
-import {Link} from 'react-router'
+import {Link} from 'react-router-dom'
 
 // Components
 import {Tabs, Orientation, ComponentSize} from '@influxdata/clockface'
@@ -44,11 +44,10 @@ class OrgNavigation extends PureComponent<Props> {
         link: `/orgs/${orgID}/members`,
       },
       {
-        text: 'Members',
+        text: 'Users',
         id: 'members-quartz',
         cloudOnly: true,
-        link: `${CLOUD_URL}/organizations/${orgID}${CLOUD_USERS_PATH}`,
-        featureFlag: 'multiUser',
+        href: `${CLOUD_URL}/organizations/${orgID}${CLOUD_USERS_PATH}`,
       },
       {
         text: 'About',

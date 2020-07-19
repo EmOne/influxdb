@@ -46,12 +46,15 @@ var FluxEndToEndSkipList = map[string]map[string]string{
 		"window_null": "failed to read meta data: panic: interface conversion: interface {} is nil, not float64",
 
 		// these may just be missing calls to range() in the tests.  easy to fix in a new PR.
-		"group_nulls":         "unbounded test",
-		"integral":            "unbounded test",
-		"integral_columns":    "unbounded test",
-		"map":                 "unbounded test",
-		"join_missing_on_col": "unbounded test",
-		"rowfn_with_import":   "unbounded test",
+		"group_nulls":           "unbounded test",
+		"integral":              "unbounded test",
+		"integral_columns":      "unbounded test",
+		"map":                   "unbounded test",
+		"join_missing_on_col":   "unbounded test",
+		"join_use_previous":     "unbounded test (https://github.com/influxdata/flux/issues/2996)",
+		"rowfn_with_import":     "unbounded test",
+		"merge_filter_flag_on":  "unbounded test (https://github.com/influxdata/flux/issues/2995)",
+		"merge_filter_flag_off": "unbounded test (https://github.com/influxdata/flux/issues/2994)",
 
 		// the following tests have a difference between the CSV-decoded input table, and the storage-retrieved version of that table
 		"columns":            "group key mismatch",
@@ -90,10 +93,12 @@ var FluxEndToEndSkipList = map[string]map[string]string{
 		"to_uint": "dateTime conversion issue: https://github.com/influxdata/influxdb/issues/14575",
 
 		"holt_winters_panic": "Expected output is an empty table which breaks the testing framework (https://github.com/influxdata/influxdb/issues/14749)",
+		"map_nulls":          "to cannot write null values",
 	},
 	"experimental": {
-		"set":  "Reason TBD",
-		"join": "unbounded test",
+		"set":       "Reason TBD",
+		"join":      "unbounded test",
+		"alignTime": "unbounded test",
 	},
 	"experimental/geo": {
 		"filterRowsNotStrict": "tableFind does not work in e2e tests: https://github.com/influxdata/influxdb/issues/13975",
@@ -132,10 +137,8 @@ var FluxEndToEndSkipList = map[string]map[string]string{
 		"join": "unbounded test",
 	},
 	"testing/chronograf": {
-		"buckets": "unbounded test",
-	},
-	"testing/influxql": {
-		"aggregate_group_by_time": "https://github.com/influxdata/influxdb/issues/16940",
+		"buckets":                "unbounded test",
+		"aggregate_window_count": "flakey test: https://github.com/influxdata/influxdb/issues/18463",
 	},
 	"testing/kapacitor": {
 		"fill_default": "unknown field type for f1",
@@ -147,5 +150,24 @@ var FluxEndToEndSkipList = map[string]map[string]string{
 	"testing/promql": {
 		"emptyTable": "tests a source",
 		"year":       "flakey test: https://github.com/influxdata/influxdb/issues/15667",
+	},
+}
+
+type PerTestFeatureFlagMap = map[string]map[string]map[string]string
+
+var FluxEndToEndFeatureFlags = PerTestFeatureFlagMap{
+	"planner": {
+		"window_count_push": {
+			"pushDownWindowAggregateCount": "true",
+		},
+		"window_sum_push": {
+			"pushDownWindowAggregateSum": "true",
+		},
+		"bare_count_push": {
+			"pushDownWindowAggregateCount": "true",
+		},
+		"bare_sum_push": {
+			"pushDownWindowAggregateSum": "true",
+		},
 	},
 }

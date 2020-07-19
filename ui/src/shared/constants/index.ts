@@ -36,7 +36,7 @@ export const DASHBOARD_LAYOUT_ROW_HEIGHT = 83.5
 export const NOTIFICATION_TRANSITION = 250
 export const FIVE_SECONDS = 5000
 export const TEN_SECONDS = 10000
-export const INFINITE = -1
+export const FIFTEEN_SECONDS = 15000
 
 export const HOMEPAGE_PATHNAME = 'me'
 
@@ -65,7 +65,7 @@ export const CLOUD_LOGOUT_PATH = '/logout'
 export const CLOUD_USERS_PATH = '/users'
 
 export const FLUX_RESPONSE_BYTES_LIMIT = CLOUD
-  ? 10 * 1024 * 1024 // 10 MiB
+  ? 27 * 1024 * 1024 // 27 MiB  (desa: this was determined by looking at queries responses in the cloud app)
   : 100 * 1024 * 1024 // 100 MiB
 
 export const VIS_SIG_DIGITS = 4

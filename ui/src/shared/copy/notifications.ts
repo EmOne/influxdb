@@ -2,13 +2,17 @@
 import {binaryPrefixFormatter} from '@influxdata/giraffe'
 
 // Types
-import {Notification} from 'src/types'
-import {NotificationStyle} from 'src/types/notifications'
+import {Notification, NotificationStyle} from 'src/types'
 
 // Constants
-import {FIVE_SECONDS, TEN_SECONDS, INFINITE} from 'src/shared/constants/index'
+import {
+  FIVE_SECONDS,
+  TEN_SECONDS,
+  FIFTEEN_SECONDS,
+} from 'src/shared/constants/index'
 import {QUICKSTART_SCRAPER_TARGET_URL} from 'src/dataLoaders/constants/pluginConfigs'
 import {QUICKSTART_DASHBOARD_NAME} from 'src/onboarding/constants/index'
+import {IconFont} from '@influxdata/clockface'
 
 const bytesFormatter = binaryPrefixFormatter({
   suffix: 'B',
@@ -23,19 +27,19 @@ type NotificationExcludingMessage = Pick<
 
 const defaultErrorNotification: NotificationExcludingMessage = {
   style: NotificationStyle.Error,
-  icon: 'alert-triangle',
+  icon: IconFont.AlertTriangle,
   duration: TEN_SECONDS,
 }
 
 const defaultSuccessNotification: NotificationExcludingMessage = {
   style: NotificationStyle.Success,
-  icon: 'checkmark',
+  icon: IconFont.Checkmark,
   duration: FIVE_SECONDS,
 }
 
 const defaultDeletionNotification: NotificationExcludingMessage = {
   style: NotificationStyle.Primary,
-  icon: 'trash',
+  icon: IconFont.Trash,
   duration: FIVE_SECONDS,
 }
 
@@ -44,8 +48,7 @@ const defaultDeletionNotification: NotificationExcludingMessage = {
 
 export const newVersion = (version: string): Notification => ({
   style: NotificationStyle.Info,
-  icon: 'cubo-uniform',
-  duration: INFINITE,
+  icon: IconFont.Cubouniform,
   message: `Welcome to the latest Chronograf${version}. Local settings cleared.`,
 })
 
@@ -56,21 +59,20 @@ export const loadLocalSettingsFailed = (error: string): Notification => ({
 
 export const presentationMode = (): Notification => ({
   style: NotificationStyle.Primary,
-  icon: 'expand-b',
+  icon: IconFont.ExpandB,
   duration: 7500,
   message: 'Press ESC to exit Presentation Mode.',
 })
 
 export const sessionTimedOut = (): Notification => ({
   style: NotificationStyle.Primary,
-  icon: 'triangle',
-  duration: INFINITE,
+  icon: IconFont.Triangle,
   message: 'Your session has timed out. Log in again to continue.',
 })
 
 export const resultTooLarge = (bytesRead: number): Notification => ({
   style: NotificationStyle.Error,
-  icon: 'triangle',
+  icon: IconFont.Triangle,
   duration: FIVE_SECONDS,
   message: `Large response truncated to first ${bytesFormatter(bytesRead)}`,
 })
@@ -89,6 +91,11 @@ export const SetupError = (message: string): Notification => ({
 export const SigninError: Notification = {
   ...defaultErrorNotification,
   message: `Could not sign in`,
+}
+
+export const checkStatusLoading: Notification = {
+  ...defaultSuccessNotification,
+  message: `Currently loading checks`,
 }
 
 export const QuickstartScraperCreationSuccess: Notification = {
@@ -145,25 +152,30 @@ export const dashboardGetFailed = (
   error: string
 ): Notification => ({
   ...defaultErrorNotification,
-  icon: 'dash-h',
+  icon: IconFont.DashH,
   message: `Failed to load dashboard with id "${dashboardID}": ${error}`,
 })
 
 export const dashboardUpdateFailed = (): Notification => ({
   ...defaultErrorNotification,
-  icon: 'dash-h',
+  icon: IconFont.DashH,
   message: 'Could not update dashboard',
 })
 
 export const dashboardDeleted = (name: string): Notification => ({
   ...defaultSuccessNotification,
-  icon: 'dash-h',
+  icon: IconFont.DashH,
   message: `Dashboard ${name} deleted successfully.`,
 })
 
 export const dashboardCreateFailed = () => ({
   ...defaultErrorNotification,
   message: 'Failed to create dashboard.',
+})
+
+export const dashboardCreateSuccess = () => ({
+  ...defaultSuccessNotification,
+  message: 'Created dashboard successfully',
 })
 
 export const dashboardDeleteFailed = (
@@ -189,16 +201,20 @@ export const cellAdded = (
   dashboardName?: string
 ): Notification => ({
   ...defaultSuccessNotification,
-  icon: 'dash-h',
+  icon: IconFont.DashH,
   message: `Added new cell ${cellName + ' '}to dashboard ${dashboardName}`,
 })
 
 export const cellAddFailed = (
-  cellName?: string,
-  dashboardName?: string
+  message: string = 'unknown error'
 ): Notification => ({
   ...defaultErrorNotification,
-  message: `Failed to add cell ${cellName + ' '}to dashboard ${dashboardName}`,
+  message: `Failed to add cell: ${message}`,
+})
+
+export const cellCopyFailed = (): Notification => ({
+  ...defaultErrorNotification,
+  message: 'Cell copy failed',
 })
 
 export const cellUpdateFailed = (): Notification => ({
@@ -208,7 +224,7 @@ export const cellUpdateFailed = (): Notification => ({
 
 export const cellDeleted = (): Notification => ({
   ...defaultDeletionNotification,
-  icon: 'dash-h',
+  icon: IconFont.DashH,
   duration: 1900,
   message: `Cell deleted from dashboard.`,
 })
@@ -226,7 +242,7 @@ export const removedDashboardLabelFailed = (): Notification => ({
 // Variables & URL Queries
 export const invalidTimeRangeValueInURLQuery = (): Notification => ({
   ...defaultErrorNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: `Invalid URL query value supplied for lower or upper time range.`,
 })
 
@@ -242,37 +258,37 @@ export const getVariableFailed = (): Notification => ({
 
 export const createVariableFailed = (error: string): Notification => ({
   ...defaultErrorNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: `Failed to create variable: ${error}`,
 })
 
 export const createVariableSuccess = (name: string): Notification => ({
   ...defaultSuccessNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: `Successfully created new variable: ${name}.`,
 })
 
 export const deleteVariableFailed = (error: string): Notification => ({
   ...defaultErrorNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: `Failed to delete variable: ${error}`,
 })
 
 export const deleteVariableSuccess = (): Notification => ({
   ...defaultSuccessNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: 'Successfully deleted the variable',
 })
 
 export const updateVariableFailed = (error: string): Notification => ({
   ...defaultErrorNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: `Failed to update variable: ${error}`,
 })
 
 export const updateVariableSuccess = (name: string): Notification => ({
   ...defaultSuccessNotification,
-  icon: 'cube',
+  icon: IconFont.Cube,
   message: `Successfully updated variable: ${name}.`,
 })
 
@@ -281,7 +297,7 @@ export const copyToClipboardSuccess = (
   title: string = ''
 ): Notification => ({
   ...defaultSuccessNotification,
-  icon: 'dash-h',
+  icon: IconFont.Cube,
   type: 'copyToClipboardSuccess',
   message: `${title} '${text}' has been copied to clipboard.`,
 })
@@ -439,6 +455,46 @@ export const getBucketFailed = (
   message: `Failed to fetch bucket with id ${bucketID}: ${error}`,
 })
 
+// Demodata buckets
+
+export const demoDataAddBucketFailed = (
+  bucketName: string,
+  message: string
+): Notification => ({
+  ...defaultErrorNotification,
+  message: `Could not create dashboard for demodata bucket ${bucketName}: ${message}`,
+})
+
+export const demoDataDeleteBucketFailed = (
+  bucketName: string,
+  error: string
+): Notification => ({
+  ...defaultErrorNotification,
+  message: `Failed to delete demo data bucket: ${bucketName}: ${error}`,
+})
+
+export const demoDataSucceeded = (
+  bucketName: string,
+  link: string
+): Notification => ({
+  ...defaultSuccessNotification,
+  message: `Successfully added demodata bucket ${bucketName}, and demodata dashboard.`,
+  duration: FIFTEEN_SECONDS,
+  linkText: 'Go to dashboard',
+  link,
+})
+
+export const demoDataAvailability = (error: {
+  message: string
+  linkText?: string
+  link?: string
+}): Notification => ({
+  ...defaultErrorNotification,
+  ...error,
+  duration: TEN_SECONDS,
+  type: 'demoDataAvailabilityError',
+})
+
 // Limits
 export const readWriteCardinalityLimitReached = (
   message: string
@@ -471,6 +527,11 @@ export const resourceLimitReached = (resourceName: string): Notification => ({
   message: `Oops. It looks like you have reached the maximum number of ${resourceName} allowed as part of your plan. If you would like to upgrade and remove this restriction, reach out to support@influxdata.com.`,
   duration: FIVE_SECONDS,
   type: 'resourceLimitReached',
+})
+
+export const queryCancelRequest = (): Notification => ({
+  ...defaultSuccessNotification,
+  message: `Cancelling query...`,
 })
 
 export const taskNotCreated = (additionalMessage: string): Notification => ({
@@ -528,7 +589,7 @@ export const taskUpdateSuccess = (): Notification => ({
 
 export const taskImportFailed = (errorMessage: string): Notification => ({
   ...defaultErrorNotification,
-  duration: INFINITE,
+  duration: undefined,
   message: `Failed to import Task: ${errorMessage}.`,
 })
 
@@ -901,3 +962,17 @@ export const invalidJSON = (message: string): Notification => {
       : 'We couldn’t parse the JSON you entered because it isn’t valid. Please check the formatting and try again.',
   }
 }
+
+export const communityTemplateInstallSucceeded = (
+  templateName: string
+): Notification => ({
+  ...defaultSuccessNotification,
+  message: `We've successfully installed: ${templateName}`,
+})
+
+export const communityTemplateDeleteSucceeded = (
+  templateName: string
+): Notification => ({
+  ...defaultSuccessNotification,
+  message: `We've successfully deleted: ${templateName}`,
+})

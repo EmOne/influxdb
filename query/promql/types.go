@@ -11,7 +11,7 @@ import (
 	"github.com/influxdata/flux/interpreter"
 	"github.com/influxdata/flux/semantic"
 	"github.com/influxdata/flux/stdlib/universe"
-	"github.com/influxdata/influxdb/query/stdlib/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2/query/stdlib/influxdata/influxdb"
 )
 
 type ArgKind int
@@ -148,7 +148,7 @@ func (s *Selector) QuerySpec() (*flux.Spec, error) {
 		{
 			ID: "from", // TODO: Change this to a UUID
 			Spec: &influxdb.FromOpSpec{
-				Bucket: "prometheus",
+				Bucket: influxdb.NameOrID{Name: "prometheus"},
 			},
 		},
 	}
@@ -260,11 +260,15 @@ func NewWhereOperation(metricName string, labels []*LabelMatcher) (*flux.Operati
 			Fn: interpreter.ResolvedFunction{
 				Scope: nil,
 				Fn: &semantic.FunctionExpression{
-					Block: &semantic.FunctionBlock{
-						Parameters: &semantic.FunctionParameters{
-							List: []*semantic.FunctionParameter{{Key: &semantic.Identifier{Name: "r"}}},
+					Parameters: &semantic.FunctionParameters{
+						List: []*semantic.FunctionParameter{{Key: &semantic.Identifier{Name: "r"}}},
+					},
+					Block: &semantic.Block{
+						Body: []semantic.Statement{
+							&semantic.ReturnStatement{
+								Argument: node,
+							},
 						},
-						Body: node,
 					},
 				},
 			},

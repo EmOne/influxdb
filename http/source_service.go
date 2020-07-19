@@ -9,12 +9,11 @@ import (
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/csv"
 	"github.com/influxdata/flux/lang"
-	"github.com/influxdata/flux/repl"
 	"github.com/influxdata/httprouter"
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/pkg/httpc"
-	"github.com/influxdata/influxdb/query"
-	"github.com/influxdata/influxdb/query/influxql"
+	platform "github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
+	"github.com/influxdata/influxdb/v2/query"
+	"github.com/influxdata/influxdb/v2/query/influxql"
 	"go.uber.org/zap"
 )
 
@@ -167,10 +166,6 @@ func decodeSourceQueryRequest(r *http.Request) (*query.ProxyRequest, error) {
 	case lang.FluxCompilerType:
 		req.Request.Compiler = lang.FluxCompiler{
 			Query: request.Query,
-		}
-	case repl.CompilerType:
-		req.Request.Compiler = repl.Compiler{
-			Spec: request.Spec,
 		}
 	case influxql.CompilerType:
 		req.Request.Compiler = &influxql.Compiler{

@@ -1,5 +1,5 @@
 // Libraries
-import {parse} from '@influxdata/flux-parser'
+import {parse} from 'src/external/parser'
 import {get} from 'lodash'
 
 // API
@@ -12,16 +12,27 @@ import {runStatusesQuery} from 'src/alerting/utils/statusEvents'
 
 // Actions
 import {notify} from 'src/shared/actions/notifications'
+import {hydrateVariables} from 'src/variables/actions/thunks'
 
 // Constants
-import {rateLimitReached, resultTooLarge} from 'src/shared/copy/notifications'
+import {
+  rateLimitReached,
+  resultTooLarge,
+  demoDataAvailability,
+} from 'src/shared/copy/notifications'
 
 // Utils
 import {getActiveTimeMachine, getActiveQuery} from 'src/timeMachine/selectors'
-import {checkQueryResult} from 'src/shared/utils/checkQueryResult'
+import fromFlux from 'src/shared/utils/fromFlux'
+import {isFlagEnabled} from 'src/shared/utils/featureFlag'
 import {getAllVariables, asAssignment} from 'src/variables/selectors'
 import {buildVarsOption} from 'src/variables/utils/buildVarsOption'
 import {findNodes} from 'src/shared/utils/ast'
+import {
+  isDemoDataAvailabilityError,
+  demoDataError,
+} from 'src/cloud/utils/demoDataErrors'
+import {event} from 'src/cloud/utils/reporting'
 
 // Types
 import {CancelBox} from 'src/types/promises'
@@ -32,6 +43,8 @@ import {
   Node,
   ResourceType,
   Bucket,
+  QueryEditMode,
+  BuilderTagsType,
 } from 'src/types'
 
 // Selectors
@@ -51,7 +64,7 @@ interface SetQueryResults {
   }
 }
 
-const setQueryResults = (
+export const setQueryResults = (
   status: RemoteDataState,
   files?: string[],
   fetchDuration?: number,
@@ -86,6 +99,58 @@ export const getOrgIDFromBuckets = (
   return get(bucketMatch, 'orgID', null)
 }
 
+//We only need a minimum of one bucket, function, and tag,
+export const getQueryFromFlux = (text: string) => {
+  const ast = parse(text)
+
+  const aggregateWindowQuery: string[] = findNodes(
+    ast,
+    isFromFunction
+  ).map(node =>
+    get(node, 'arguments.0.properties.0.value.values.0.magnitude', '')
+  )
+
+  const bucketsInQuery: string[] = findNodes(ast, isFromBucket).map(node =>
+    get(node, 'arguments.0.properties.0.value.value', '')
+  )
+
+  const functionsInQuery: string[] = findNodes(ast, isFromFunction).map(node =>
+    get(node, 'arguments.0.properties.1.value.name', '')
+  )
+
+  const tagsKeysInQuery: string[] = findNodes(ast, isFromTag).map(node =>
+    get(node, 'arguments.0.properties.0.value.body.left.property.value', '')
+  )
+
+  const tagsValuesInQuery: string[] = findNodes(ast, isFromTag).map(node =>
+    get(node, 'arguments.0.properties.0.value.body.right.value', '')
+  )
+
+  const functionName = functionsInQuery.join()
+  const aggregateWindowName = aggregateWindowQuery.join()
+  const firstTagKey = tagsKeysInQuery.pop()
+  const firstValueKey = tagsValuesInQuery.pop()
+
+  // we need [bucket], functions=[{1}], tags = [{aggregateFunctionType: "filter",key: "_measurement",values:["cpu", "disk"]}]
+  return {
+    builderConfig: {
+      buckets: bucketsInQuery,
+      functions: [{name: functionName}],
+      tags: [
+        {
+          aggregateFunctionType: 'filter',
+          key: firstTagKey,
+          values: [firstValueKey],
+        } as BuilderTagsType,
+      ],
+      aggregateWindow: {period: aggregateWindowName},
+    },
+    editMode: 'builder' as QueryEditMode,
+    name: '',
+    text: text,
+  }
+}
+
 const isFromBucket = (node: Node) => {
   return (
     get(node, 'type') === 'CallExpression' &&
@@ -95,16 +160,36 @@ const isFromBucket = (node: Node) => {
   )
 }
 
-export const executeQueries = () => async (dispatch, getState: GetState) => {
+const isFromFunction = (node: Node) => {
+  return (
+    get(node, 'callee.type') === 'Identifier' &&
+    get(node, 'callee.name') === 'aggregateWindow' &&
+    get(node, 'arguments.0.properties.1.key.name') === 'fn'
+  )
+}
+
+const isFromTag = (node: Node) => {
+  return (
+    get(node, 'callee.type') === 'Identifier' &&
+    get(node, 'callee.name') === 'filter' &&
+    get(node, 'arguments.0.properties.0.value.type') === 'FunctionExpression'
+  )
+}
+
+export const executeQueries = (abortController?: AbortController) => async (
+  dispatch,
+  getState: GetState
+) => {
+  const executeQueriesStartTime = Date.now()
+
   const state = getState()
 
   const allBuckets = getAll<Bucket>(state, ResourceType.Buckets)
 
-  const {view} = getActiveTimeMachine(state)
-  const queries = view.properties.queries.filter(({text}) => !!text.trim())
-  const {
-    alertBuilder: {id: checkID},
-  } = state
+  const activeTimeMachine = getActiveTimeMachine(state)
+  const queries = activeTimeMachine.view.properties.queries.filter(
+    ({text}) => !!text.trim()
+  )
 
   if (!queries.length) {
     dispatch(setQueryResults(RemoteDataState.Done, [], null))
@@ -113,31 +198,48 @@ export const executeQueries = () => async (dispatch, getState: GetState) => {
   try {
     dispatch(setQueryResults(RemoteDataState.Loading, [], null))
 
-    const variableAssignments = getAllVariables(
-      state,
-      state.timeMachines.activeTimeMachineID
-    ).map(v => asAssignment(v))
+    await dispatch(hydrateVariables())
+
+    const variableAssignments = getAllVariables(state)
+      .map(v => asAssignment(v))
+      .filter(v => !!v)
 
     // keeping getState() here ensures that the state we are working with
     // is the most current one. By having this set to state, we were creating a race
     // condition that was causing the following bug:
     // https://github.com/influxdata/idpe/issues/6240
 
-    const startTime = Date.now()
+    const startTime = window.performance.now()
+    const startDate = Date.now()
 
     pendingResults.forEach(({cancel}) => cancel())
 
     pendingResults = queries.map(({text}) => {
+      event('executeQueries query', {}, {query: text})
       const orgID = getOrgIDFromBuckets(text, allBuckets) || getOrg(state).id
+
+      if (getOrg(state).id === orgID) {
+        event('orgData_queried')
+      } else {
+        event('demoData_queried')
+      }
+
       const extern = buildVarsOption(variableAssignments)
 
-      return runQuery(orgID, text, extern)
+      event('runQuery', {context: 'timeMachine'})
+      return runQuery(orgID, text, extern, abortController)
     })
-
     const results = await Promise.all(pendingResults.map(r => r.promise))
-    const duration = Date.now() - startTime
+
+    const duration = window.performance.now() - startTime
+
+    event('executeQueries querying', {time: startDate, duration})
 
     let statuses = [[]] as StatusRow[][]
+    const {
+      alertBuilder: {id: checkID},
+    } = state
+
     if (checkID) {
       const extern = buildVarsOption(variableAssignments)
       pendingCheckStatuses = runStatusesQuery(getOrg(state).id, checkID, extern)
@@ -146,6 +248,12 @@ export const executeQueries = () => async (dispatch, getState: GetState) => {
 
     for (const result of results) {
       if (result.type === 'UNKNOWN_ERROR') {
+        if (isDemoDataAvailabilityError(result.code, result.message)) {
+          dispatch(
+            notify(demoDataAvailability(demoDataError(getOrg(state).id)))
+          )
+        }
+
         throw new Error(result.message)
       }
 
@@ -159,20 +267,33 @@ export const executeQueries = () => async (dispatch, getState: GetState) => {
         dispatch(notify(resultTooLarge(result.bytesRead)))
       }
 
-      checkQueryResult(result.csv)
+      if (isFlagEnabled('fluxParser')) {
+        // TODO: this is just here for validation. since we are already eating
+        // the cost of parsing the results, we should store the output instead
+        // of the raw input
+        fromFlux(result.csv)
+      }
     }
 
     const files = (results as RunQuerySuccessResult[]).map(r => r.csv)
     dispatch(
       setQueryResults(RemoteDataState.Done, files, duration, null, statuses)
     )
-  } catch (e) {
-    if (e.name === 'CancellationError') {
+
+    event('executeQueries function', {
+      time: executeQueriesStartTime,
+      duration: Date.now() - executeQueriesStartTime,
+    })
+
+    return results
+  } catch (error) {
+    if (error.name === 'CancellationError' || error.name === 'AbortError') {
+      dispatch(setQueryResults(RemoteDataState.Done, null, null))
       return
     }
 
-    console.error(e)
-    dispatch(setQueryResults(RemoteDataState.Error, null, null, e.message))
+    console.error(error)
+    dispatch(setQueryResults(RemoteDataState.Error, null, null, error.message))
   }
 }
 
@@ -184,9 +305,12 @@ const saveDraftQueries = (): SaveDraftQueriesAction => ({
   type: 'SAVE_DRAFT_QUERIES',
 })
 
-export const saveAndExecuteQueries = () => dispatch => {
+export const saveAndExecuteQueries = (
+  abortController?: AbortController
+) => dispatch => {
   dispatch(saveDraftQueries())
-  dispatch(executeQueries())
+  dispatch(setQueryResults(RemoteDataState.Loading, [], null))
+  dispatch(executeQueries(abortController))
 }
 
 export const executeCheckQuery = () => async (dispatch, getState: GetState) => {
@@ -224,7 +348,12 @@ export const executeCheckQuery = () => async (dispatch, getState: GetState) => {
       dispatch(notify(resultTooLarge(result.bytesRead)))
     }
 
-    checkQueryResult(result.csv)
+    if (isFlagEnabled('fluxParser')) {
+      // TODO: this is just here for validation. since we are already eating
+      // the cost of parsing the results, we should store the output instead
+      // of the raw input
+      fromFlux(result.csv)
+    }
 
     const file = result.csv
 

@@ -56,7 +56,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/influxdata/influxdb/pkg/fs"
+	"github.com/influxdata/influxdb/v2/pkg/fs"
 )
 
 const (
@@ -276,6 +276,7 @@ func (t *Tombstoner) TombstoneFiles() []FileStat {
 	t.mu.Lock()
 	t.fileStats = append(t.fileStats[:0], FileStat{
 		Path:         t.tombstonePath(),
+		CreatedAt:    stat.ModTime().UnixNano(),
 		LastModified: stat.ModTime().UnixNano(),
 		Size:         uint32(stat.Size()),
 	})

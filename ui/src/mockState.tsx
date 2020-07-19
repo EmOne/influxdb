@@ -1,11 +1,12 @@
 import React from 'react'
 import {Provider} from 'react-redux'
-import {Router, createMemoryHistory} from 'react-router'
+import {Router} from 'react-router-dom'
+import {createMemoryHistory} from 'history'
 
-import {render} from 'react-testing-library'
+import {render} from '@testing-library/react'
 import {initialState as initialVariablesState} from 'src/variables/reducers'
 import {initialState as initialUserSettingsState} from 'src/userSettings/reducers'
-import configureStore from 'src/store/configureStore'
+import {default as configureStore, clearStore} from 'src/store/configureStore'
 import {RemoteDataState, TimeZone, LocalStorage, ResourceType} from 'src/types'
 import {pastFifteenMinTimeRange} from './shared/constants/timeRanges'
 
@@ -16,6 +17,7 @@ export const localState: LocalStorage = {
   app: {
     ephemeral: {
       inPresentationMode: false,
+      hasUpdatedTimeRangeInVEO: false,
     },
     persisted: {
       autoRefresh: 0,
@@ -23,7 +25,13 @@ export const localState: LocalStorage = {
       navBarState: 'expanded',
       timeZone: 'Local' as TimeZone,
       theme: 'dark',
+      notebookMiniMapState: 'expanded',
     },
+  },
+  flags: {
+    status: RemoteDataState.Done,
+    original: {},
+    override: {},
   },
   VERSION: '2.0.0',
   ranges: {
@@ -47,12 +55,12 @@ export const localState: LocalStorage = {
   },
 }
 
-const history = createMemoryHistory({entries: ['/']})
-
 export function renderWithRedux(ui, initialState = s => s) {
-  const seedStore = configureStore(localState, history)
+  clearStore()
+  const seedStore = configureStore(localState)
   const seedState = seedStore.getState()
-  const store = configureStore(initialState(seedState), history)
+  clearStore()
+  const store = configureStore(initialState(seedState))
 
   return {
     ...render(<Provider store={store}>{ui}</Provider>),
@@ -60,14 +68,13 @@ export function renderWithRedux(ui, initialState = s => s) {
   }
 }
 
-export function renderWithReduxAndRouter(
-  ui,
-  initialState = s => s,
-  {route = '/', history = createMemoryHistory({entries: [route]})} = {}
-) {
-  const seedStore = configureStore(localState, history)
+export function renderWithReduxAndRouter(ui, initialState = s => s) {
+  clearStore()
+  const history = createMemoryHistory({initialEntries: ['/']})
+  const seedStore = configureStore(localState)
   const seedState = seedStore.getState()
-  const store = configureStore(initialState(seedState), history)
+  clearStore()
+  const store = configureStore(initialState(seedState))
 
   return {
     ...render(
@@ -81,7 +88,7 @@ export function renderWithReduxAndRouter(
 
 export function renderWithRouter(
   ui,
-  {route = '/', history = createMemoryHistory({entries: [route]})} = {}
+  {route = '/', history = createMemoryHistory({initialEntries: [route]})} = {}
 ) {
   return {
     ...render(<Router history={history}>{ui}</Router>),

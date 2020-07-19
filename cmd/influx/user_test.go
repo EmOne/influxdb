@@ -8,9 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +42,7 @@ func TestCmdUser(t *testing.T) {
 			},
 			passSVC: passSVC,
 			urmSVC: &mock.UserResourceMappingService{
-				CreateMappingFn: func(context.Context, *platform.UserResourceMapping) error {
+				CreateMappingFn: func(context.Context, *influxdb.UserResourceMapping) error {
 					return nil
 				},
 			},
@@ -129,7 +128,7 @@ func TestCmdUser(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, passSVC, nil)), opt)
+				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, passSVC, nil)), g, opt)
 				return builder.cmd()
 			}
 
@@ -184,7 +183,7 @@ func TestCmdUser(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, nil, nil)), opt)
+				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, nil, nil)), g, opt)
 				return builder.cmd()
 			}
 		}
@@ -277,7 +276,7 @@ func TestCmdUser(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, nil, nil)), opt)
+				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, nil, nil)), g, opt)
 				return builder.cmd()
 			}, calls
 		}
@@ -356,7 +355,7 @@ func TestCmdUser(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, nil, nil)), opt)
+				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, nil, nil)), g, opt)
 				return builder.cmd()
 			}
 		}
@@ -425,7 +424,7 @@ func TestCmdUser(t *testing.T) {
 			}
 
 			return func(g *globalFlags, opt genericCLIOpts) *cobra.Command {
-				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, passSVC, getPassFn)), opt)
+				builder := newCmdUserBuilder(fakeSVCFn(newCMDUserDeps(svc, passSVC, getPassFn)), g, opt)
 				return builder.cmd()
 			}
 		}

@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/http"
-	"github.com/influxdata/influxdb/tenant"
-	itesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/http"
+	"github.com/influxdata/influxdb/v2/tenant"
+	itesting "github.com/influxdata/influxdb/v2/testing"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -20,11 +20,8 @@ func initHttpOrgService(f itesting.OrganizationFields, t *testing.T) (influxdb.O
 	if err != nil {
 		t.Fatal(err)
 	}
-	storage, err := tenant.NewStore(s)
-	if err != nil {
-		t.Fatal(err)
-	}
 
+	storage := tenant.NewStore(s)
 	svc := tenant.NewService(storage)
 	ctx := context.Background()
 	for _, o := range f.Organizations {

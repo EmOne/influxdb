@@ -8,8 +8,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/influxdata/flux"
-	"github.com/influxdata/influxdb/query"
-	platformtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2/query"
+	platformtesting "github.com/influxdata/influxdb/v2/testing"
 )
 
 var CmpOpts = []cmp.Option{
@@ -21,7 +21,7 @@ type compilerA struct {
 	A string `json:"a"`
 }
 
-func (c compilerA) Compile(ctx context.Context) (flux.Program, error) {
+func (c compilerA) Compile(ctx context.Context, runtime flux.Runtime) (flux.Program, error) {
 	panic("not implemented")
 }
 

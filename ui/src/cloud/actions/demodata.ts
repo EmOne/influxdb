@@ -3,11 +3,33 @@ import {
   getDemoDataBuckets as getDemoDataBucketsAJAX,
   getDemoDataBucketMembership as getDemoDataBucketMembershipAJAX,
   deleteDemoDataBucketMembership as deleteDemoDataBucketMembershipAJAX,
+  getNormalizedDemoDataBucket,
 } from 'src/cloud/apis/demodata'
+import {createDashboardFromTemplate} from 'src/templates/api'
+import {getBucket} from 'src/client'
+
+// Actions
+import {addBucket, removeBucket} from 'src/buckets/actions/creators'
+import {notify} from 'src/shared/actions/notifications'
+
+// Selectors
+import {getOrg} from 'src/organizations/selectors'
+
+// Constants
+import {DemoDataTemplates} from 'src/cloud/constants'
+import {
+  demoDataAddBucketFailed,
+  demoDataDeleteBucketFailed,
+  demoDataSucceeded,
+} from 'src/shared/copy/notifications'
+
+// Utils
+import {reportError} from 'src/shared/utils/errors'
+import {getErrorMessage} from 'src/utils/api'
+import {event} from 'src/cloud/utils/reporting'
 
 // Types
-import {Bucket, RemoteDataState, GetState} from 'src/types'
-import {getBuckets} from 'src/buckets/actions/thunks'
+import {Bucket, RemoteDataState, GetState, DemoBucket} from 'src/types'
 
 export type Actions =
   | ReturnType<typeof setDemoDataStatus>
@@ -35,51 +57,95 @@ export const getDemoDataBuckets = () => async (
   if (status === RemoteDataState.NotStarted) {
     dispatch(setDemoDataStatus(RemoteDataState.Loading))
   }
+
   try {
     const buckets = await getDemoDataBucketsAJAX()
 
-    dispatch(setDemoDataStatus(RemoteDataState.Done))
     dispatch(setDemoDataBuckets(buckets))
   } catch (error) {
     console.error(error)
+
+    reportError(error, {
+      name: 'getDemoDataBuckets function',
+    })
+
     dispatch(setDemoDataStatus(RemoteDataState.Error))
   }
 }
 
-export const getDemoDataBucketMembership = (bucketID: string) => async (
-  dispatch,
-  getState: GetState
-) => {
-  const {
-    me: {id: userID},
-  } = getState()
+export const getDemoDataBucketMembership = ({
+  name: bucketName,
+  id: bucketID,
+}) => async (dispatch, getState: GetState) => {
+  const state = getState()
+
+  const {id: orgID} = getOrg(state)
 
   try {
-    await getDemoDataBucketMembershipAJAX(bucketID, userID)
+    await getDemoDataBucketMembershipAJAX(bucketID)
 
-    dispatch(getBuckets())
-    // TODO: check for success and error appropriately
-    // TODO: instantiate dashboard template
+    const normalizedBucket = await getNormalizedDemoDataBucket(bucketID)
+
+    dispatch(addBucket(normalizedBucket))
   } catch (error) {
-    console.error(error)
+    dispatch(
+      notify(demoDataAddBucketFailed(bucketName, getErrorMessage(error)))
+    )
+
+    reportError(error, {
+      name: 'addDemoDataBucket failed in getDemoDataBucketMembership',
+    })
+
+    return
+  }
+
+  try {
+    const template = await DemoDataTemplates[bucketName]
+
+    if (!template) {
+      throw new Error(`dashboard template was not found`)
+    }
+
+    const createdDashboard = await createDashboardFromTemplate(template, orgID)
+
+    const url = `/orgs/${orgID}/dashboards/${createdDashboard.id}`
+
+    dispatch(notify(demoDataSucceeded(bucketName, url)))
+
+    event('demoData_bucketAdded', {demo_dataset: bucketName})
+  } catch (error) {
+    const errorMessage = getErrorMessage(error)
+
+    dispatch(notify(demoDataAddBucketFailed(bucketName, errorMessage)))
+
+    if (errorMessage != 'creating dashboard would exceed quota') {
+      reportError(error, {
+        name: 'addDemoDataDashboard failed in getDemoDataBucketMembership',
+      })
+    }
   }
 }
 
-export const deleteDemoDataBucketMembership = (bucketID: string) => async (
-  dispatch,
-  getState: GetState
-) => {
-  const {
-    me: {id: userID},
-  } = getState()
-
+export const deleteDemoDataBucketMembership = (
+  bucket: DemoBucket
+) => async dispatch => {
   try {
-    await deleteDemoDataBucketMembershipAJAX(bucketID, userID)
-    dispatch(getBuckets())
+    await deleteDemoDataBucketMembershipAJAX(bucket.id)
 
-    // TODO: check for success and error appropriately
-    // TODO: delete associated dashboard
+    // an unsuccessful delete membership req can also return 204 to prevent userID sniffing, so need to check that bucket is really unreachable
+    const resp = await getBucket({bucketID: bucket.id})
+
+    if (resp.status === 200) {
+      throw new Error('Request to remove demo data bucket did not succeed')
+    }
+
+    dispatch(removeBucket(bucket.id))
+    event('demoData_bucketDeleted', {demo_dataset: bucket.name})
   } catch (error) {
-    console.error(error)
+    dispatch(notify(demoDataDeleteBucketFailed(bucket.name, error)))
+
+    reportError(error, {
+      name: 'deleteDemoDataBucket failed in deleteDemoDataBucketMembership',
+    })
   }
 }

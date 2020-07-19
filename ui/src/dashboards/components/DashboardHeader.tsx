@@ -1,7 +1,7 @@
 // Libraries
-import React, {Component} from 'react'
-import {connect} from 'react-redux'
-import {withRouter, WithRouterProps} from 'react-router'
+import React, {FC, useEffect} from 'react'
+import {connect, ConnectedProps} from 'react-redux'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
 
 // Components
 import AutoRefreshDropdown from 'src/shared/components/dropdown_auto_refresh/AutoRefreshDropdown'
@@ -14,16 +14,19 @@ import TimeZoneDropdown from 'src/shared/components/TimeZoneDropdown'
 import {Button, IconFont, ComponentColor, Page} from '@influxdata/clockface'
 
 // Actions
-import {toggleShowVariablesControls} from 'src/userSettings/actions'
-import {updateDashboard} from 'src/dashboards/actions/thunks'
+import {toggleShowVariablesControls as toggleShowVariablesControlsAction} from 'src/userSettings/actions'
+import {updateDashboard as updateDashboardAction} from 'src/dashboards/actions/thunks'
 import {
-  setAutoRefreshInterval,
-  setAutoRefreshStatus,
+  setAutoRefreshInterval as setAutoRefreshIntervalAction,
+  setAutoRefreshStatus as setAutoRefreshStatusAction,
 } from 'src/shared/actions/autoRefresh'
 import {
-  setDashboardTimeRange,
-  updateQueryParams,
+  setDashboardTimeRange as setDashboardTimeRangeAction,
+  updateQueryParams as updateQueryParamsAction,
 } from 'src/dashboards/actions/ranges'
+
+// Utils
+import {event} from 'src/cloud/utils/reporting'
 
 // Selectors
 import {getTimeRange} from 'src/dashboards/selectors'
@@ -31,6 +34,7 @@ import {getByID} from 'src/resources/selectors'
 import {getOrg} from 'src/organizations/selectors'
 
 // Constants
+import {DemoDataDashboardNames} from 'src/cloud/constants'
 import {
   DEFAULT_DASHBOARD_NAME,
   DASHBOARD_NAME_MAX_LENGTH,
@@ -42,7 +46,6 @@ import {
   AutoRefresh,
   AutoRefreshStatus,
   Dashboard,
-  Organization,
   ResourceType,
   TimeRange,
 } from 'src/types'
@@ -52,113 +55,45 @@ interface OwnProps {
   onManualRefresh: () => void
 }
 
-interface StateProps {
-  org: Organization
-  dashboard: Dashboard
-  showVariablesControls: boolean
-  timeRange: TimeRange
-}
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = OwnProps & ReduxProps & RouteComponentProps<{orgID: string}>
 
-interface DispatchProps {
-  toggleShowVariablesControls: typeof toggleShowVariablesControls
-  updateDashboard: typeof updateDashboard
-  onSetAutoRefreshStatus: typeof setAutoRefreshStatus
-  updateQueryParams: typeof updateQueryParams
-  setDashboardTimeRange: typeof setDashboardTimeRange
-  handleChooseAutoRefresh: typeof setAutoRefreshInterval
-}
+const DashboardHeader: FC<Props> = ({
+  dashboard,
+  onManualRefresh,
+  toggleShowVariablesControls,
+  showVariablesControls,
+  onSetAutoRefreshStatus,
+  setAutoRefreshInterval,
+  autoRefresh,
+  timeRange,
+  updateDashboard,
+  updateQueryParams,
+  setDashboardTimeRange,
+  history,
+  org,
+}) => {
+  useEffect(() => {
+    const demoDataset = DemoDataDashboardNames[dashboard.name]
+    if (demoDataset) {
+      event('demoData_dashboardViewed', {demo_dataset: demoDataset})
+    }
+  }, [dashboard.id])
 
-type Props = OwnProps & StateProps & DispatchProps & WithRouterProps
-
-class DashboardHeader extends Component<Props> {
-  public render() {
-    const {
-      dashboard,
-      onManualRefresh,
-      toggleShowVariablesControls,
-      showVariablesControls,
-      autoRefresh,
-      timeRange,
-    } = this.props
-
-    return (
-      <>
-        <Page.Header fullWidth={true}>
-          <RenamablePageTitle
-            maxLength={DASHBOARD_NAME_MAX_LENGTH}
-            onRename={this.handleRenameDashboard}
-            name={dashboard && dashboard.name}
-            placeholder={DEFAULT_DASHBOARD_NAME}
-          />
-        </Page.Header>
-        <Page.ControlBar fullWidth={true}>
-          <Page.ControlBarLeft>
-            <Button
-              icon={IconFont.AddCell}
-              color={ComponentColor.Primary}
-              onClick={this.handleAddCell}
-              text="Add Cell"
-              titleText="Add cell to dashboard"
-            />
-            <Button
-              icon={IconFont.TextBlock}
-              text="Add Note"
-              onClick={this.handleAddNote}
-            />
-            <Button
-              icon={IconFont.Cube}
-              text="Variables"
-              onClick={toggleShowVariablesControls}
-              color={
-                showVariablesControls
-                  ? ComponentColor.Secondary
-                  : ComponentColor.Default
-              }
-            />
-            <DashboardLightModeToggle />
-            <PresentationModeToggle />
-            <GraphTips />
-          </Page.ControlBarLeft>
-          <Page.ControlBarRight>
-            <TimeZoneDropdown />
-            <AutoRefreshDropdown
-              onChoose={this.handleChooseAutoRefresh}
-              onManualRefresh={onManualRefresh}
-              selected={autoRefresh}
-            />
-            <TimeRangeDropdown
-              onSetTimeRange={this.handleChooseTimeRange}
-              timeRange={timeRange}
-            />
-          </Page.ControlBarRight>
-        </Page.ControlBar>
-      </>
-    )
+  const handleAddNote = () => {
+    history.push(`/orgs/${org.id}/dashboards/${dashboard.id}/notes/new`)
   }
 
-  private handleAddNote = () => {
-    const {router, org, dashboard} = this.props
-    router.push(`/orgs/${org.id}/dashboards/${dashboard.id}/notes/new`)
+  const handleAddCell = () => {
+    history.push(`/orgs/${org.id}/dashboards/${dashboard.id}/cells/new`)
   }
 
-  private handleAddCell = () => {
-    const {router, org, dashboard} = this.props
-    router.push(`/orgs/${org.id}/dashboards/${dashboard.id}/cells/new`)
-  }
-
-  private handleRenameDashboard = (name: string) => {
-    const {dashboard, updateDashboard} = this.props
-
+  const handleRenameDashboard = (name: string) => {
     updateDashboard(dashboard.id, {name})
   }
 
-  private handleChooseAutoRefresh = (milliseconds: number) => {
-    const {
-      handleChooseAutoRefresh,
-      onSetAutoRefreshStatus,
-      dashboard,
-    } = this.props
-    handleChooseAutoRefresh(dashboard.id, milliseconds)
+  const handleChooseAutoRefresh = (milliseconds: number) => {
+    setAutoRefreshInterval(dashboard.id, milliseconds)
 
     if (milliseconds === 0) {
       onSetAutoRefreshStatus(dashboard.id, AutoRefreshStatus.Paused)
@@ -168,15 +103,7 @@ class DashboardHeader extends Component<Props> {
     onSetAutoRefreshStatus(dashboard.id, AutoRefreshStatus.Active)
   }
 
-  private handleChooseTimeRange = (timeRange: TimeRange) => {
-    const {
-      autoRefresh,
-      onSetAutoRefreshStatus,
-      setDashboardTimeRange,
-      updateQueryParams,
-      dashboard,
-    } = this.props
-
+  const handleChooseTimeRange = (timeRange: TimeRange) => {
     setDashboardTimeRange(dashboard.id, timeRange)
     updateQueryParams({
       lower: timeRange.lower,
@@ -197,9 +124,65 @@ class DashboardHeader extends Component<Props> {
       onSetAutoRefreshStatus(dashboard.id, AutoRefreshStatus.Active)
     }
   }
+
+  return (
+    <>
+      <Page.Header fullWidth={true}>
+        <RenamablePageTitle
+          maxLength={DASHBOARD_NAME_MAX_LENGTH}
+          onRename={handleRenameDashboard}
+          name={dashboard && dashboard.name}
+          placeholder={DEFAULT_DASHBOARD_NAME}
+        />
+      </Page.Header>
+      <Page.ControlBar fullWidth={true}>
+        <Page.ControlBarLeft>
+          <Button
+            icon={IconFont.AddCell}
+            color={ComponentColor.Primary}
+            onClick={handleAddCell}
+            text="Add Cell"
+            titleText="Add cell to dashboard"
+          />
+          <Button
+            icon={IconFont.TextBlock}
+            text="Add Note"
+            onClick={handleAddNote}
+            testID="add-note--button"
+          />
+          <Button
+            icon={IconFont.Cube}
+            text="Variables"
+            testID="variables--button"
+            onClick={toggleShowVariablesControls}
+            color={
+              showVariablesControls
+                ? ComponentColor.Secondary
+                : ComponentColor.Default
+            }
+          />
+          <DashboardLightModeToggle />
+          <PresentationModeToggle />
+          <GraphTips />
+        </Page.ControlBarLeft>
+        <Page.ControlBarRight>
+          <TimeZoneDropdown />
+          <AutoRefreshDropdown
+            onChoose={handleChooseAutoRefresh}
+            onManualRefresh={onManualRefresh}
+            selected={autoRefresh}
+          />
+          <TimeRangeDropdown
+            onSetTimeRange={handleChooseTimeRange}
+            timeRange={timeRange}
+          />
+        </Page.ControlBarRight>
+      </Page.ControlBar>
+    </>
+  )
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const {showVariablesControls} = state.userSettings
   const dashboard = getByID<Dashboard>(
     state,
@@ -207,7 +190,7 @@ const mstp = (state: AppState): StateProps => {
     state.currentDashboard.id
   )
 
-  const timeRange = getTimeRange(state, state.currentDashboard.id)
+  const timeRange = getTimeRange(state)
   const org = getOrg(state)
 
   return {
@@ -218,16 +201,15 @@ const mstp = (state: AppState): StateProps => {
   }
 }
 
-const mdtp: DispatchProps = {
-  toggleShowVariablesControls: toggleShowVariablesControls,
-  updateDashboard: updateDashboard,
-  onSetAutoRefreshStatus: setAutoRefreshStatus,
-  updateQueryParams: updateQueryParams,
-  setDashboardTimeRange: setDashboardTimeRange,
-  handleChooseAutoRefresh: setAutoRefreshInterval,
+const mdtp = {
+  toggleShowVariablesControls: toggleShowVariablesControlsAction,
+  updateDashboard: updateDashboardAction,
+  onSetAutoRefreshStatus: setAutoRefreshStatusAction,
+  updateQueryParams: updateQueryParamsAction,
+  setDashboardTimeRange: setDashboardTimeRangeAction,
+  setAutoRefreshInterval: setAutoRefreshIntervalAction,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(withRouter<OwnProps>(DashboardHeader))
+const connector = connect(mstp, mdtp)
+
+export default connector(withRouter(DashboardHeader))

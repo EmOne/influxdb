@@ -1,6 +1,6 @@
 // Libraries
 import React, {FC} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import {SelectGroup, ButtonShape, Icon, IconFont} from '@influxdata/clockface'
@@ -9,23 +9,17 @@ import {SelectGroup, ButtonShape, Icon, IconFont} from '@influxdata/clockface'
 import {setTheme} from 'src/shared/actions/app'
 
 // Types
-import {AppState, Theme} from 'src/types'
+import {AppState} from 'src/types'
 
-interface StateProps {
-  theme: Theme
-}
-
-interface DispatchProps {
-  onSetTheme: typeof setTheme
-}
-
-interface OwnProps {}
-
-type Props = OwnProps & StateProps & DispatchProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps
 
 const DashboardLightModeToggle: FC<Props> = ({theme, onSetTheme}) => {
   return (
-    <SelectGroup testID="presentation-mode-toggle" shape={ButtonShape.Square}>
+    <SelectGroup
+      testID="presentation-mode-toggle-group"
+      shape={ButtonShape.Square}
+    >
       <SelectGroup.Option
         onClick={() => onSetTheme('dark')}
         value={false}
@@ -48,7 +42,7 @@ const DashboardLightModeToggle: FC<Props> = ({theme, onSetTheme}) => {
   )
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const {
     app: {
       persisted: {theme},
@@ -58,11 +52,10 @@ const mstp = (state: AppState): StateProps => {
   return {theme}
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onSetTheme: setTheme,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(DashboardLightModeToggle)
+const connector = connect(mstp, mdtp)
+
+export default connector(DashboardLightModeToggle)

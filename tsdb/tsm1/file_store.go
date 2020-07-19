@@ -17,14 +17,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/pkg/fs"
-	"github.com/influxdata/influxdb/pkg/limiter"
-	"github.com/influxdata/influxdb/pkg/metrics"
-	"github.com/influxdata/influxdb/query"
-	"github.com/influxdata/influxdb/tsdb/cursors"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/pkg/fs"
+	"github.com/influxdata/influxdb/v2/pkg/limiter"
+	"github.com/influxdata/influxdb/v2/pkg/metrics"
+	"github.com/influxdata/influxdb/v2/query"
+	"github.com/influxdata/influxdb/v2/tsdb/cursors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -161,6 +162,12 @@ type TSMFile interface {
 	// Next must be called before calling any of the accessors.
 	TimeRangeIterator(key []byte, min, max int64) *TimeRangeIterator
 
+	// TimeRangeMaxTimeIterator returns an iterator over the keys, starting at the provided
+	// key. Calling the HasData and MaxTime accessors will be restricted to the
+	// interval [min, max] for the current key.
+	// Next must be called before calling any of the accessors.
+	TimeRangeMaxTimeIterator(key []byte, min, max int64) *TimeRangeMaxTimeIterator
+
 	// Free releases any resources held by the FileStore to free up system resources.
 	Free() error
 
@@ -217,6 +224,8 @@ type FileStore struct {
 	parseFileName ParseFileNameFunc
 
 	obs FileStoreObserver
+
+	pageFaultLimiter *rate.Limiter
 }
 
 // FileStat holds information about a TSM file on disk.
@@ -224,6 +233,7 @@ type FileStat struct {
 	Path             string
 	HasTombstone     bool
 	Size             uint32
+	CreatedAt        int64
 	LastModified     int64
 	MinTime, MaxTime int64
 	MinKey, MaxKey   []byte
@@ -283,6 +293,11 @@ func (f *FileStore) ParseFileName(path string) (int, int, error) {
 // SetCurrentGenerationFunc must be set before using FileStore.
 func (f *FileStore) SetCurrentGenerationFunc(fn func() int) {
 	f.currentGenerationFunc = fn
+}
+
+// WithPageFaultLimiter sets the rate limiter used for limiting page faults.
+func (f *FileStore) WithPageFaultLimiter(limiter *rate.Limiter) {
+	f.pageFaultLimiter = limiter
 }
 
 // WithLogger sets the logger on the file store.
@@ -663,6 +678,7 @@ func (f *FileStore) Open(ctx context.Context) error {
 			start := time.Now()
 			df, err := NewTSMReader(file,
 				WithMadviseWillNeed(f.tsmMMAPWillNeed),
+				WithTSMReaderPageFaultLimiter(f.pageFaultLimiter),
 				WithTSMReaderLogger(f.logger))
 			f.logger.Info("Opened file",
 				zap.String("path", file.Name()),
@@ -904,6 +920,7 @@ func (f *FileStore) replace(oldFiles, newFiles []string, updatedFn func(r []TSMF
 
 		tsm, err := NewTSMReader(fd,
 			WithMadviseWillNeed(f.tsmMMAPWillNeed),
+			WithTSMReaderPageFaultLimiter(f.pageFaultLimiter),
 			WithTSMReaderLogger(f.logger))
 		if err != nil {
 			return err

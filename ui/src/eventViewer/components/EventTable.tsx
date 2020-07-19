@@ -1,5 +1,6 @@
 // Libraries
-import React, {useLayoutEffect, FC} from 'react'
+import React, {useLayoutEffect, FC, useEffect, useState} from 'react'
+import {useDispatch} from 'react-redux'
 import {AutoSizer, InfiniteLoader, List} from 'react-virtualized'
 
 // Components
@@ -8,6 +9,9 @@ import TableRow from 'src/eventViewer/components/TableRow'
 import LoadingRow from 'src/eventViewer/components/LoadingRow'
 import FooterRow from 'src/eventViewer/components/FooterRow'
 import ErrorRow from 'src/eventViewer/components/ErrorRow'
+
+// Actions
+import {notify} from 'src/shared/actions/notifications'
 
 // Utils
 import {
@@ -19,16 +23,42 @@ import {
 import {EventViewerChildProps, Fields} from 'src/eventViewer/types'
 import {RemoteDataState} from 'src/types'
 
-type Props = EventViewerChildProps & {
+// Constants
+import {checkStatusLoading} from 'src/shared/copy/notifications'
+
+type OwnProps = {
   fields: Fields
 }
+
+type Props = EventViewerChildProps & OwnProps
+
+const rowLoadedFn = state => ({index}) => !!state.rows[index]
 
 const EventTable: FC<Props> = ({state, dispatch, loadRows, fields}) => {
   const rowCount = getRowCount(state)
 
-  const isRowLoaded = ({index}) => !!state.rows[index]
+  const isRowLoaded = rowLoadedFn(state)
+
+  const isRowLoadedBoolean = !!state.rows[0]
 
   const loadMoreRows = () => loadNextRows(state, dispatch, loadRows)
+
+  const [isLongRunningQuery, setIsLongRunningQuery] = useState(false)
+
+  const reduxDispatch = useDispatch()
+
+  useEffect(() => {
+    const timeoutID = setTimeout(() => {
+      setIsLongRunningQuery(true)
+    }, 5000)
+    return () => clearTimeout(timeoutID)
+  }, [setIsLongRunningQuery])
+
+  useEffect(() => {
+    if (isLongRunningQuery && !isRowLoadedBoolean) {
+      reduxDispatch(notify(checkStatusLoading))
+    }
+  }, [isLongRunningQuery, isRowLoadedBoolean, reduxDispatch])
 
   const rowRenderer = ({key, index, style}) => {
     const isLastRow = index === state.rows.length

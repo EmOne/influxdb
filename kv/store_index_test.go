@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/kv/migration"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,10 +24,18 @@ func TestIndexStore(t *testing.T) {
 
 		const resource = "foo"
 
+		bucketName := []byte("foo_ent_" + bktSuffix)
+		indexBucketName := []byte("foo_idx+" + bktSuffix)
+
+		ctx := context.Background()
+		if err := migration.CreateBuckets("add foo buckets", bucketName, indexBucketName).Up(ctx, kvStoreStore); err != nil {
+			t.Fatal(err)
+		}
+
 		indexStore := &kv.IndexStore{
 			Resource:   resource,
-			EntStore:   newStoreBase(resource, []byte("foo_ent_"+bktSuffix), kv.EncIDKey, kv.EncBodyJSON, decJSONFooFn, decFooEntFn),
-			IndexStore: kv.NewOrgNameKeyStore(resource, []byte("foo_idx_"+bktSuffix), false),
+			EntStore:   newStoreBase(resource, bucketName, kv.EncIDKey, kv.EncBodyJSON, decJSONFooFn, decFooEntFn),
+			IndexStore: kv.NewOrgNameKeyStore(resource, indexBucketName, false),
 		}
 
 		return indexStore, done, kvStoreStore
@@ -101,6 +109,23 @@ func TestIndexStore(t *testing.T) {
 				return err
 			})
 			require.NoError(t, err)
+		})
+
+		t.Run("updating an existing entity to a new unique identifier should delete the existing unique key", func(t *testing.T) {
+			indexStore, done, kvStore := newFooIndexStore(t, "put")
+			defer done()
+
+			expected := testPutBase(t, kvStore, indexStore, indexStore.EntStore.BktName)
+
+			update(t, kvStore, func(tx kv.Tx) error {
+				entCopy := newFooEnt(expected.ID, expected.OrgID, "safe name")
+				return indexStore.Put(context.TODO(), tx, entCopy, kv.PutUpdate())
+			})
+
+			update(t, kvStore, func(tx kv.Tx) error {
+				ent := newFooEnt(33, expected.OrgID, expected.Name)
+				return indexStore.Put(context.TODO(), tx, ent, kv.PutNew())
+			})
 		})
 
 		t.Run("error cases", func(t *testing.T) {

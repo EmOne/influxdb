@@ -1,6 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 import {isEmpty} from 'lodash'
 import classnames from 'classnames'
 
@@ -17,12 +17,13 @@ import {
   getVariables,
   getDashboardVariablesStatus,
 } from 'src/variables/selectors'
+import {filterUnusedVars} from 'src/shared/utils/filterUnusedVars'
 
 // Actions
-import {moveVariable} from 'src/variables/actions/creators'
+import {moveVariable} from 'src/variables/actions/thunks'
 
 // Types
-import {AppState, Variable} from 'src/types'
+import {AppState} from 'src/types'
 import {ComponentSize} from '@influxdata/clockface'
 
 // Decorators
@@ -31,29 +32,18 @@ import {RemoteDataState} from 'src/types'
 import DraggableDropdown from 'src/dashboards/components/variablesControlBar/DraggableDropdown'
 import withDragDropContext from 'src/shared/decorators/withDragDropContext'
 
-interface StateProps {
-  variables: Variable[]
-  variablesStatus: RemoteDataState
-  inPresentationMode: boolean
-  dashboardID: string
-  show: boolean
-}
-
-interface DispatchProps {
-  moveVariable: typeof moveVariable
-}
-
 interface State {
   initialLoading: RemoteDataState
 }
 
-type Props = StateProps & DispatchProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps
 
 @ErrorHandling
 class VariablesControlBar extends PureComponent<Props, State> {
   public state: State = {initialLoading: RemoteDataState.Loading}
 
-  static getDerivedStateFromProps(props, state) {
+  static getDerivedStateFromProps(props: Props, state: State) {
     if (
       props.variablesStatus === RemoteDataState.Done &&
       state.initialLoading !== RemoteDataState.Done
@@ -106,7 +96,7 @@ class VariablesControlBar extends PureComponent<Props, State> {
   }
 
   private get barContents(): JSX.Element {
-    const {dashboardID, variables, variablesStatus} = this.props
+    const {variables, variablesStatus} = this.props
     return (
       <div className="variables-control-bar--full">
         {variables.map((v, i) => (
@@ -115,7 +105,6 @@ class VariablesControlBar extends PureComponent<Props, State> {
               name={v.name}
               id={v.id}
               index={i}
-              dashboardID={dashboardID}
               moveDropdown={this.handleMoveDropdown}
             />
           </ErrorBoundary>
@@ -141,8 +130,8 @@ class VariablesControlBar extends PureComponent<Props, State> {
     originalIndex: number,
     newIndex: number
   ): void => {
-    const {dashboardID, moveVariable} = this.props
-    moveVariable(originalIndex, newIndex, dashboardID)
+    const {moveVariable} = this.props
+    moveVariable(originalIndex, newIndex)
   }
 }
 
@@ -150,9 +139,9 @@ const mdtp = {
   moveVariable,
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const dashboardID = state.currentDashboard.id
-  const variables = getVariables(state, dashboardID)
+  const variables = getVariables(state)
   const variablesStatus = getDashboardVariablesStatus(state)
   const show = state.userSettings.showVariablesControls
 
@@ -162,18 +151,21 @@ const mstp = (state: AppState): StateProps => {
     },
   } = state
 
-  return {
+  const varsInUse = filterUnusedVars(
     variables,
+    Object.values(state.resources.views.byID).filter(
+      variable => variable.dashboardID === dashboardID
+    )
+  )
+
+  return {
+    variables: varsInUse,
     variablesStatus,
     inPresentationMode,
-    dashboardID,
     show,
   }
 }
 
-export default withDragDropContext(
-  connect<StateProps, DispatchProps>(
-    mstp,
-    mdtp
-  )(VariablesControlBar)
-)
+const connector = connect(mstp, mdtp)
+
+export default withDragDropContext(connector(VariablesControlBar))

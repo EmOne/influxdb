@@ -7,9 +7,9 @@ import (
 	"net/http"
 
 	"github.com/influxdata/httprouter"
-	"github.com/influxdata/influxdb"
-	icontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2"
+	icontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 	"go.uber.org/zap"
 )
 
@@ -50,7 +50,6 @@ const (
 	mePasswordPath    = "/api/v2/me/password"
 	usersIDPath       = "/api/v2/users/:id"
 	usersPasswordPath = "/api/v2/users/:id/password"
-	usersLogPath      = "/api/v2/users/:id/logs"
 )
 
 // NewUserHandler returns a new instance of UserHandler.
@@ -68,7 +67,6 @@ func NewUserHandler(log *zap.Logger, b *UserBackend) *UserHandler {
 	h.HandlerFunc("POST", prefixUsers, h.handlePostUser)
 	h.HandlerFunc("GET", prefixUsers, h.handleGetUsers)
 	h.HandlerFunc("GET", usersIDPath, h.handleGetUser)
-	h.HandlerFunc("GET", usersLogPath, h.handleGetUserLog)
 	h.HandlerFunc("PATCH", usersIDPath, h.handlePatchUser)
 	h.HandlerFunc("DELETE", usersIDPath, h.handleDeleteUser)
 	// the POST doesn't need to be nested under users in this scheme
@@ -336,72 +334,6 @@ func decodeDeleteUserRequest(ctx context.Context, r *http.Request) (*deleteUserR
 	}, nil
 }
 
-// hanldeGetUserLog retrieves a user log by the users ID.
-func (h *UserHandler) handleGetUserLog(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	req, err := decodeGetUserLogRequest(ctx, r)
-	if err != nil {
-		h.HandleHTTPError(ctx, err, w)
-		return
-	}
-
-	log, _, err := h.UserOperationLogService.GetUserOperationLog(ctx, req.UserID, req.opts)
-	if err != nil {
-		h.HandleHTTPError(ctx, err, w)
-		return
-	}
-	h.log.Debug("User log retrieved", zap.String("log", fmt.Sprint(log)))
-
-	if err := encodeResponse(ctx, w, http.StatusOK, newUserLogResponse(req.UserID, log)); err != nil {
-		h.HandleHTTPError(ctx, err, w)
-		return
-	}
-}
-
-type getUserLogRequest struct {
-	UserID influxdb.ID
-	opts   influxdb.FindOptions
-}
-
-func decodeGetUserLogRequest(ctx context.Context, r *http.Request) (*getUserLogRequest, error) {
-	params := httprouter.ParamsFromContext(ctx)
-	id := params.ByName("id")
-	if id == "" {
-		return nil, &influxdb.Error{
-			Code: influxdb.EInvalid,
-			Msg:  "url missing id",
-		}
-	}
-
-	var i influxdb.ID
-	if err := i.DecodeFromString(id); err != nil {
-		return nil, err
-	}
-
-	opts, err := decodeFindOptions(r)
-	if err != nil {
-		return nil, err
-	}
-
-	return &getUserLogRequest{
-		UserID: i,
-		opts:   *opts,
-	}, nil
-}
-
-func newUserLogResponse(id influxdb.ID, es []*influxdb.OperationLogEntry) *operationLogResponse {
-	logs := make([]*operationLogEntryResponse, 0, len(es))
-	for _, e := range es {
-		logs = append(logs, newOperationLogEntryResponse(e))
-	}
-	return &operationLogResponse{
-		Links: map[string]string{
-			"self": fmt.Sprintf("/api/v2/users/%s/logs", id),
-		},
-		Logs: logs,
-	}
-}
-
 type usersResponse struct {
 	Links map[string]string `json:"links"`
 	Users []*UserResponse   `json:"users"`
@@ -610,7 +542,7 @@ func (s *UserService) FindUser(ctx context.Context, filter influxdb.UserFilter) 
 // FindUsers returns a list of users that match filter and the total count of matching users.
 // Additional options provide pagination & sorting.
 func (s *UserService) FindUsers(ctx context.Context, filter influxdb.UserFilter, opt ...influxdb.FindOptions) ([]*influxdb.User, int, error) {
-	params := findOptionParams(opt...)
+	params := influxdb.FindOptionParams(opt...)
 	if filter.ID != nil {
 		params = append(params, [2]string{"id", filter.ID.String()})
 	}
@@ -662,6 +594,13 @@ func (s *UserService) DeleteUser(ctx context.Context, id influxdb.ID) error {
 			return CheckErrorStatus(http.StatusNoContent, resp)
 		}).
 		Do(ctx)
+}
+
+func (s *UserService) FindPermissionForUser(ctx context.Context, uid influxdb.ID) (influxdb.PermissionSet, error) {
+	return nil, &influxdb.Error{
+		Code: influxdb.EInternal,
+		Msg:  "not implemented",
+	}
 }
 
 // PasswordService is an http client to speak to the password service.

@@ -17,13 +17,26 @@ import {
   Label,
 } from 'src/types'
 
+import {Stack} from 'src/client'
+
+export interface InstalledStack extends Stack {
+  eventType: string
+  name: string
+  resources: any[]
+  sources: string[]
+}
+
 export interface TemplateSummary extends Omit<GenTemplateSummary, 'labels'> {
   labels: string[]
   status: RemoteDataState
 }
 
+export type CommunityTemplate = any
+
 export interface TemplatesState extends NormalizedState<TemplateSummary> {
   exportTemplate: {status: RemoteDataState; item: DocumentCreate}
+  communityTemplateToInstall: CommunityTemplate
+  stacks: InstalledStack[]
 }
 
 interface KeyValuePairs {

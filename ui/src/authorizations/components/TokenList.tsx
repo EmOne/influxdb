@@ -4,14 +4,14 @@ import _ from 'lodash'
 import memoizeOne from 'memoize-one'
 
 // Components
-import {EmptyState, Overlay, IndexList} from '@influxdata/clockface'
+import {Overlay, ResourceList} from '@influxdata/clockface'
 import TokenRow from 'src/authorizations/components/TokenRow'
 import ViewTokenOverlay from 'src/authorizations/components/ViewTokenOverlay'
 
 // Types
 import {Authorization} from 'src/types'
 import {SortTypes} from 'src/shared/utils/sort'
-import {ComponentSize, Sort} from '@influxdata/clockface'
+import {Sort} from '@influxdata/clockface'
 
 // Utils
 import {getSortedResources} from 'src/shared/utils/sort'
@@ -20,6 +20,7 @@ type SortKey = keyof Authorization
 
 interface Props {
   auths: Authorization[]
+  emptyState: JSX.Element
   searchTerm: string
   sortKey: string
   sortDirection: Sort
@@ -46,32 +47,19 @@ export default class TokenList extends PureComponent<Props, State> {
   }
 
   public render() {
-    const {sortKey, sortDirection, onClickColumn} = this.props
     const {isTokenOverlayVisible, authInView} = this.state
 
     return (
       <>
-        <IndexList>
-          <IndexList.Header>
-            <IndexList.HeaderCell
-              sortKey={this.headerKeys[0]}
-              sort={sortKey === this.headerKeys[0] ? sortDirection : Sort.None}
-              columnName="Description"
-              onClick={onClickColumn}
-              width="50%"
-            />
-            <IndexList.HeaderCell
-              sortKey={this.headerKeys[1]}
-              sort={sortKey === this.headerKeys[1] ? sortDirection : Sort.None}
-              columnName="Status"
-              onClick={onClickColumn}
-              width="50%"
-            />
-          </IndexList.Header>
-          <IndexList.Body emptyState={this.emptyState} columnCount={2}>
+        <ResourceList>
+          <ResourceList.Body
+            emptyState={this.props.emptyState}
+            testID="token-list"
+          >
             {this.rows}
-          </IndexList.Body>
-        </IndexList>
+          </ResourceList.Body>
+        </ResourceList>
+
         <Overlay visible={isTokenOverlayVisible}>
           <ViewTokenOverlay
             auth={authInView}
@@ -80,10 +68,6 @@ export default class TokenList extends PureComponent<Props, State> {
         </Overlay>
       </>
     )
-  }
-
-  private get headerKeys(): SortKey[] {
-    return ['description', 'status']
   }
 
   private get rows(): JSX.Element[] {
@@ -111,21 +95,5 @@ export default class TokenList extends PureComponent<Props, State> {
   private handleClickDescription = (authID: string): void => {
     const authInView = this.props.auths.find(a => a.id === authID)
     this.setState({isTokenOverlayVisible: true, authInView})
-  }
-
-  private get emptyState(): JSX.Element {
-    const {searchTerm} = this.props
-    let emptyStateText =
-      'There are not any Tokens associated with this account. Contact your administrator'
-
-    if (searchTerm) {
-      emptyStateText = 'No Tokens match your search term'
-    }
-
-    return (
-      <EmptyState size={ComponentSize.Large}>
-        <EmptyState.Text>{emptyStateText}</EmptyState.Text>
-      </EmptyState>
-    )
   }
 }

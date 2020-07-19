@@ -7,16 +7,17 @@ import (
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/codes"
 	"github.com/influxdata/flux/plan"
-	"github.com/influxdata/flux/semantic"
 	"github.com/influxdata/flux/values"
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/storage/reads/datatypes"
 )
 
 const (
-	ReadRangePhysKind     = "ReadRangePhysKind"
-	ReadGroupPhysKind     = "ReadGroupPhysKind"
-	ReadTagKeysPhysKind   = "ReadTagKeysPhysKind"
-	ReadTagValuesPhysKind = "ReadTagValuesPhysKind"
+	ReadRangePhysKind           = "ReadRangePhysKind"
+	ReadGroupPhysKind           = "ReadGroupPhysKind"
+	ReadWindowAggregatePhysKind = "ReadWindowAggregatePhysKind"
+	ReadTagKeysPhysKind         = "ReadTagKeysPhysKind"
+	ReadTagValuesPhysKind       = "ReadTagValuesPhysKind"
 )
 
 type ReadGroupPhysSpec struct {
@@ -50,12 +51,10 @@ type ReadRangePhysSpec struct {
 	Bucket   string
 	BucketID string
 
-	// FilterSet is set to true if there is a filter.
-	FilterSet bool
 	// Filter is the filter to use when calling into
 	// storage. It must be possible to push down this
 	// filter.
-	Filter *semantic.FunctionExpression
+	Filter *datatypes.Predicate
 
 	Bounds flux.Bounds
 }
@@ -64,19 +63,8 @@ func (s *ReadRangePhysSpec) Kind() plan.ProcedureKind {
 	return ReadRangePhysKind
 }
 func (s *ReadRangePhysSpec) Copy() plan.ProcedureSpec {
-	ns := new(ReadRangePhysSpec)
-
-	ns.Bucket = s.Bucket
-	ns.BucketID = s.BucketID
-
-	ns.FilterSet = s.FilterSet
-	if ns.FilterSet {
-		ns.Filter = s.Filter.Copy().(*semantic.FunctionExpression)
-	}
-
-	ns.Bounds = s.Bounds
-
-	return ns
+	ns := *s
+	return &ns
 }
 
 func (s *ReadRangePhysSpec) LookupBucketID(ctx context.Context, orgID influxdb.ID, buckets BucketLookup) (influxdb.ID, error) {
@@ -115,6 +103,32 @@ func (s *ReadRangePhysSpec) TimeBounds(predecessorBounds *plan.Bounds) *plan.Bou
 		Start: values.ConvertTime(s.Bounds.Start.Time(s.Bounds.Now)),
 		Stop:  values.ConvertTime(s.Bounds.Stop.Time(s.Bounds.Now)),
 	}
+}
+
+type ReadWindowAggregatePhysSpec struct {
+	plan.DefaultCost
+	ReadRangePhysSpec
+
+	WindowEvery int64
+	Aggregates  []plan.ProcedureKind
+	CreateEmpty bool
+	TimeColumn  string
+}
+
+func (s *ReadWindowAggregatePhysSpec) Kind() plan.ProcedureKind {
+	return ReadWindowAggregatePhysKind
+}
+
+func (s *ReadWindowAggregatePhysSpec) Copy() plan.ProcedureSpec {
+	ns := new(ReadWindowAggregatePhysSpec)
+
+	ns.ReadRangePhysSpec = *s.ReadRangePhysSpec.Copy().(*ReadRangePhysSpec)
+	ns.WindowEvery = s.WindowEvery
+	ns.Aggregates = s.Aggregates
+	ns.CreateEmpty = s.CreateEmpty
+	ns.TimeColumn = s.TimeColumn
+
+	return ns
 }
 
 type ReadTagKeysPhysSpec struct {

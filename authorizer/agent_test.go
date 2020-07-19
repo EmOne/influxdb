@@ -4,10 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/authorizer"
-	icontext "github.com/influxdata/influxdb/context"
-	influxdbtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/authorizer"
+	icontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/mock"
+	influxdbtesting "github.com/influxdata/influxdb/v2/testing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -154,7 +155,7 @@ func Test_Agent(t *testing.T) {
 
 		for _, tt := range tests {
 			fn := func(t *testing.T) {
-				ctx := icontext.SetAuthorizer(context.TODO(), &Authorizer{tt.permissions})
+				ctx := icontext.SetAuthorizer(context.TODO(), mock.NewMockAuthorizer(false, tt.permissions))
 
 				agent := new(authorizer.AuthAgent)
 
@@ -279,7 +280,7 @@ func Test_Agent(t *testing.T) {
 
 		for _, tt := range tests {
 			fn := func(t *testing.T) {
-				ctx := icontext.SetAuthorizer(context.TODO(), &Authorizer{tt.permissions})
+				ctx := icontext.SetAuthorizer(context.TODO(), mock.NewMockAuthorizer(false, tt.permissions))
 
 				agent := new(authorizer.AuthAgent)
 

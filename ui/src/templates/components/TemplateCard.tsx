@@ -1,8 +1,8 @@
 // Libraries
 import React, {PureComponent, MouseEvent} from 'react'
-import {connect} from 'react-redux'
-import {get} from 'lodash'
-import {withRouter, WithRouterProps} from 'react-router'
+import {connect, ConnectedProps} from 'react-redux'
+import {get, capitalize} from 'lodash'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
 import {
   Button,
   ComponentSize,
@@ -31,7 +31,7 @@ import {getOrg} from 'src/organizations/selectors'
 
 // Types
 import {ComponentColor} from '@influxdata/clockface'
-import {AppState, Organization, Label, TemplateSummary} from 'src/types'
+import {AppState, Label, TemplateSummary} from 'src/types'
 
 // Constants
 import {DEFAULT_TEMPLATE_NAME} from 'src/templates/constants'
@@ -41,51 +41,37 @@ interface OwnProps {
   onFilterChange: (searchTerm: string) => void
 }
 
-interface DispatchProps {
-  onDelete: typeof deleteTemplate
-  onClone: typeof cloneTemplate
-  onUpdate: typeof updateTemplate
-  onCreateFromTemplate: typeof createResourceFromTemplate
-  onAddTemplateLabels: typeof addTemplateLabelsAsync
-  onRemoveTemplateLabels: typeof removeTemplateLabelsAsync
-}
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps & OwnProps
 
-interface StateProps {
-  org: Organization
-}
-
-type Props = DispatchProps & OwnProps & StateProps
-
-class TemplateCard extends PureComponent<Props & WithRouterProps> {
+class TemplateCard extends PureComponent<
+  Props & RouteComponentProps<{orgID: string}>
+> {
   public render() {
     const {template, onFilterChange} = this.props
 
     return (
-      <ResourceCard
-        testID="template-card"
-        contextMenu={this.contextMenu}
-        name={
-          <ResourceCard.EditableName
-            onClick={this.handleNameClick}
-            onUpdate={this.handleUpdateTemplateName}
-            name={template.meta.name}
-            noNameString={DEFAULT_TEMPLATE_NAME}
-            testID="template-card--name"
-            buttonTestID="template-card--name-button"
-            inputTestID="template-card--input"
-          />
-        }
-        description={this.description}
-        labels={
-          <InlineLabels
-            selectedLabelIDs={template.labels}
-            onFilterChange={onFilterChange}
-            onAddLabel={this.handleAddLabel}
-            onRemoveLabel={this.handleRemoveLabel}
-          />
-        }
-        metaData={[this.templateType]}
-      />
+      <ResourceCard testID="template-card" contextMenu={this.contextMenu}>
+        <ResourceCard.EditableName
+          onClick={this.handleNameClick}
+          onUpdate={this.handleUpdateTemplateName}
+          name={template.meta.name}
+          noNameString={DEFAULT_TEMPLATE_NAME}
+          testID="template-card--name"
+          buttonTestID="template-card--name-button"
+          inputTestID="template-card--input"
+        />
+        {this.description}
+        <ResourceCard.Meta>
+          {capitalize(get(template, 'content.data.type', ''))}
+        </ResourceCard.Meta>
+        <InlineLabels
+          selectedLabelIDs={template.labels}
+          onFilterChange={onFilterChange}
+          onAddLabel={this.handleAddLabel}
+          onRemoveLabel={this.handleRemoveLabel}
+        />
+      </ResourceCard>
     )
   }
 
@@ -118,16 +104,6 @@ class TemplateCard extends PureComponent<Props & WithRouterProps> {
         description={description}
         placeholder={`Describe ${name} Template`}
       />
-    )
-  }
-
-  private get templateType(): JSX.Element {
-    const {template} = this.props
-
-    return (
-      <div className="resource-list--meta-item">
-        {get(template, 'meta.type', '')}
-      </div>
     )
   }
 
@@ -193,8 +169,8 @@ class TemplateCard extends PureComponent<Props & WithRouterProps> {
   }
 
   private handleViewTemplate = () => {
-    const {router, template, org} = this.props
-    router.push(`/orgs/${org.id}/settings/templates/${template.id}/view`)
+    const {history, template, org} = this.props
+    history.push(`/orgs/${org.id}/settings/templates/${template.id}/view`)
   }
 
   private handleAddLabel = (label: Label): void => {
@@ -210,13 +186,13 @@ class TemplateCard extends PureComponent<Props & WithRouterProps> {
   }
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   return {
     org: getOrg(state),
   }
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onDelete: deleteTemplate,
   onClone: cloneTemplate,
   onUpdate: updateTemplate,
@@ -225,7 +201,6 @@ const mdtp: DispatchProps = {
   onRemoveTemplateLabels: removeTemplateLabelsAsync,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(withRouter<Props>(TemplateCard))
+const connector = connect(mstp, mdtp)
+
+export default connector(withRouter(TemplateCard))

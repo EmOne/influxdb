@@ -5,9 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/inmem"
-	"github.com/influxdata/influxdb/pkger"
+	"github.com/influxdata/influxdb/v2/inmem"
+	"github.com/influxdata/influxdb/v2/kv/migration/all"
+	"go.uber.org/zap/zaptest"
+
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/pkger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,33 +18,47 @@ import (
 func TestStoreKV(t *testing.T) {
 	inMemStore := inmem.NewKVStore()
 
+	// run all migrations against store
+	if err := all.Up(context.Background(), zaptest.NewLogger(t), inMemStore); err != nil {
+		t.Fatal(err)
+	}
+
 	stackStub := func(id, orgID influxdb.ID) pkger.Stack {
 		now := time.Time{}.Add(10 * 365 * 24 * time.Hour)
+		urls := []string{
+			"http://example.com",
+			"http://abc.gov",
+		}
 		return pkger.Stack{
-			ID:          id,
-			OrgID:       orgID,
-			Name:        "threeve",
-			Description: "desc",
-			CRUDLog: influxdb.CRUDLog{
-				CreatedAt: now,
-				UpdatedAt: now.Add(time.Hour),
-			},
-			URLs: []string{
-				"http://example.com",
-				"http://abc.gov",
-			},
-			Resources: []pkger.StackResource{
+			ID:        id,
+			OrgID:     orgID,
+			CreatedAt: now,
+			Events: []pkger.StackEvent{
 				{
-					APIVersion: pkger.APIVersion,
-					ID:         9000,
-					Kind:       pkger.KindBucket,
-					Name:       "buzz lightyear",
-				},
-				{
-					APIVersion: pkger.APIVersion,
-					ID:         333,
-					Kind:       pkger.KindBucket,
-					Name:       "beyond",
+					EventType:    pkger.StackEventCreate,
+					Name:         "threeve",
+					Description:  "desc",
+					UpdatedAt:    now.Add(time.Hour),
+					Sources:      urls,
+					TemplateURLs: urls,
+					Resources: []pkger.StackResource{
+						{
+							APIVersion: pkger.APIVersion,
+							ID:         9000,
+							Kind:       pkger.KindBucket,
+							MetaName:   "buzz lightyear",
+							Associations: []pkger.StackResourceAssociation{{
+								Kind:     pkger.KindLabel,
+								MetaName: "foo_label",
+							}},
+						},
+						{
+							APIVersion: pkger.APIVersion,
+							ID:         333,
+							Kind:       pkger.KindBucket,
+							MetaName:   "beyond",
+						},
+					},
 				},
 			},
 		}
@@ -79,6 +96,172 @@ func TestStoreKV(t *testing.T) {
 		})
 	})
 
+	t.Run("list stacks", func(t *testing.T) {
+		defer inMemStore.Flush(context.Background())
+
+		storeKV := pkger.NewStoreKV(inMemStore)
+
+		const orgID1 = 1
+		const orgID2 = 2
+		seedEntities(t, storeKV,
+			pkger.Stack{
+				ID:    1,
+				OrgID: orgID1,
+				Events: []pkger.StackEvent{{
+					Name: "first_name",
+				}},
+			},
+			pkger.Stack{
+				ID:    2,
+				OrgID: orgID2,
+				Events: []pkger.StackEvent{{
+					Name: "first_name",
+				}},
+			},
+			pkger.Stack{
+				ID:    3,
+				OrgID: orgID1,
+				Events: []pkger.StackEvent{{
+					Name: "second_name",
+				}},
+			},
+			pkger.Stack{
+				ID:    4,
+				OrgID: orgID2,
+				Events: []pkger.StackEvent{{
+					Name: "second_name",
+				}},
+			},
+		)
+
+		tests := []struct {
+			name     string
+			orgID    influxdb.ID
+			filter   pkger.ListFilter
+			expected []pkger.Stack
+		}{
+			{
+				name:  "by org id",
+				orgID: orgID1,
+				expected: []pkger.Stack{
+					{
+						ID:    1,
+						OrgID: orgID1,
+						Events: []pkger.StackEvent{{
+							Name: "first_name",
+						}},
+					},
+					{
+						ID:    3,
+						OrgID: orgID1,
+						Events: []pkger.StackEvent{{
+							Name: "second_name",
+						}},
+					},
+				},
+			},
+			{
+				name:  "by stack ids",
+				orgID: orgID1,
+				filter: pkger.ListFilter{
+					StackIDs: []influxdb.ID{1, 3},
+				},
+				expected: []pkger.Stack{
+					{
+						ID:    1,
+						OrgID: orgID1,
+						Events: []pkger.StackEvent{{
+							Name: "first_name",
+						}},
+					},
+					{
+						ID:    3,
+						OrgID: orgID1,
+						Events: []pkger.StackEvent{{
+							Name: "second_name",
+						}},
+					},
+				},
+			},
+			{
+				name:  "by stack ids skips ids that belong to different organization",
+				orgID: orgID1,
+				filter: pkger.ListFilter{
+					StackIDs: []influxdb.ID{1, 2, 4},
+				},
+				expected: []pkger.Stack{{
+					ID:    1,
+					OrgID: orgID1,
+					Events: []pkger.StackEvent{{
+						Name: "first_name",
+					}},
+				}},
+			},
+			{
+				name:  "stack ids that do not exist are skipped",
+				orgID: orgID1,
+				filter: pkger.ListFilter{
+					StackIDs: []influxdb.ID{1, 9000},
+				},
+				expected: []pkger.Stack{{
+					ID:    1,
+					OrgID: orgID1,
+					Events: []pkger.StackEvent{{
+						Name: "first_name",
+					}},
+				}},
+			},
+			{
+				name:  "by name",
+				orgID: orgID1,
+				filter: pkger.ListFilter{
+					Names: []string{"first_name"},
+				},
+				expected: []pkger.Stack{{
+					ID:    1,
+					OrgID: orgID1,
+					Events: []pkger.StackEvent{{
+						Name: "first_name",
+					}},
+				}},
+			},
+			{
+				name:  "by name and id",
+				orgID: orgID1,
+				filter: pkger.ListFilter{
+					StackIDs: []influxdb.ID{3},
+					Names:    []string{"first_name"},
+				},
+				expected: []pkger.Stack{
+					{
+						ID:    1,
+						OrgID: orgID1,
+						Events: []pkger.StackEvent{{
+							Name: "first_name",
+						}},
+					},
+					{
+						ID:    3,
+						OrgID: orgID1,
+						Events: []pkger.StackEvent{{
+							Name: "second_name",
+						}},
+					},
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			fn := func(t *testing.T) {
+				stacks, err := storeKV.ListStacks(context.Background(), tt.orgID, tt.filter)
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, stacks)
+			}
+
+			t.Run(tt.name, fn)
+		}
+	})
+
 	t.Run("read a stack", func(t *testing.T) {
 		defer inMemStore.Flush(context.Background())
 
@@ -112,18 +295,22 @@ func TestStoreKV(t *testing.T) {
 		seedEntities(t, storeKV, expected)
 
 		t.Run("with valid ID updates stack successfully", func(t *testing.T) {
-			updateStack := expected
-			updateStack.Resources = append(updateStack.Resources, pkger.StackResource{
+			expected := stackStub(id, orgID)
+			event := expected.LatestEvent()
+			event.EventType = pkger.StackEventUpdate
+			event.UpdatedAt = event.UpdatedAt.Add(time.Hour)
+			event.Resources = append(event.Resources, pkger.StackResource{
 				APIVersion: pkger.APIVersion,
 				ID:         333,
 				Kind:       pkger.KindBucket,
-				Name:       "beyond",
+				MetaName:   "beyond",
 			})
+			expected.Events = append(expected.Events, event)
 
-			err := storeKV.UpdateStack(context.Background(), updateStack)
+			err := storeKV.UpdateStack(context.Background(), expected)
 			require.NoError(t, err)
 
-			readStackEqual(t, storeKV, updateStack)
+			readStackEqual(t, storeKV, expected)
 		})
 
 		t.Run("when no match found fails with not found error", func(t *testing.T) {

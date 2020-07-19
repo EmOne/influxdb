@@ -1,6 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import {
@@ -10,31 +10,22 @@ import {
 } from '@influxdata/clockface'
 
 // Actions
-import {selectValue} from 'src/variables/actions/creators'
+import {selectValue} from 'src/variables/actions/thunks'
 
 // Utils
-import {getVariable} from 'src/variables/selectors'
+import {getVariable, normalizeValues} from 'src/variables/selectors'
 
 // Types
-import {AppState} from 'src/types'
-
-interface StateProps {
-  values: string[]
-  selectedValue: string
-}
-
-interface DispatchProps {
-  onSelectValue: typeof selectValue
-}
+import {AppState, RemoteDataState} from 'src/types'
 
 interface OwnProps {
   variableID: string
-  contextID: string
   testID?: string
   onSelect?: () => void
 }
 
-type Props = StateProps & DispatchProps & OwnProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = OwnProps & ReduxProps
 
 class VariableDropdown extends PureComponent<Props> {
   render() {
@@ -42,6 +33,14 @@ class VariableDropdown extends PureComponent<Props> {
 
     const dropdownStatus =
       values.length === 0 ? ComponentStatus.Disabled : ComponentStatus.Default
+
+    const longestItemWidth = Math.floor(
+      values.reduce(function(a, b) {
+        return a.length > b.length ? a : b
+      }, '').length * 9.5
+    )
+
+    const widthLength = Math.max(140, longestItemWidth)
 
     return (
       <div className="variable-dropdown">
@@ -57,11 +56,12 @@ class VariableDropdown extends PureComponent<Props> {
               testID="variable-dropdown--button"
               status={dropdownStatus}
             >
-              {selectedValue || 'No Values'}
+              {this.selectedText}
             </Dropdown.Button>
           )}
           menu={onCollapse => (
             <Dropdown.Menu
+              style={{width: `${widthLength}px`}}
               onCollapse={onCollapse}
               theme={DropdownMenuTheme.Amethyst}
             >
@@ -74,6 +74,7 @@ class VariableDropdown extends PureComponent<Props> {
                     onClick={this.handleSelect}
                     selected={val === selectedValue}
                     testID="variable-dropdown--item"
+                    className="variable-dropdown--item"
                   >
                     {val}
                   </Dropdown.Item>
@@ -87,46 +88,46 @@ class VariableDropdown extends PureComponent<Props> {
   }
 
   private handleSelect = (selectedValue: string) => {
-    const {contextID, variableID, onSelectValue, onSelect} = this.props
+    const {
+      variableID,
+      onSelectValue,
+      onSelect,
+      selectedValue: prevSelectedValue,
+    } = this.props
 
-    onSelectValue(contextID, variableID, selectedValue)
+    if (prevSelectedValue !== selectedValue) {
+      onSelectValue(variableID, selectedValue)
+    }
 
     if (onSelect) {
       onSelect()
     }
   }
+
+  private get selectedText() {
+    const {selectedValue, status} = this.props
+    if (status === RemoteDataState.Loading) {
+      return 'Loading'
+    }
+
+    if (selectedValue) {
+      return selectedValue
+    }
+
+    return 'No Values'
+  }
 }
 
-const mstp = (state: AppState, props: OwnProps): StateProps => {
-  const {contextID, variableID} = props
-
-  const variable = getVariable(state, contextID, variableID)
-  const type = variable.arguments.type
-
-  if (type === 'constant') {
-    return {
-      values: variable.arguments.values,
-      selectedValue: variable.selected[0],
-    }
-  }
-
-  if (type === 'map') {
-    return {
-      values: Object.keys(variable.arguments.values),
-      selectedValue: variable.selected[0],
-    }
-  }
-
-  if (type === 'query') {
-    return {
-      values: variable.arguments.values.results || [],
-      selectedValue: variable.selected[0],
-    }
-  }
+const mstp = (state: AppState, props: OwnProps) => {
+  const {variableID} = props
+  const variable = getVariable(state, variableID)
+  const selected =
+    variable.selected && variable.selected.length ? variable.selected[0] : null
 
   return {
-    values: [],
-    selectedValue: '',
+    status: variable.status,
+    values: normalizeValues(variable),
+    selectedValue: selected,
   }
 }
 
@@ -134,7 +135,6 @@ const mdtp = {
   onSelectValue: selectValue,
 }
 
-export default connect<StateProps, DispatchProps, OwnProps>(
-  mstp,
-  mdtp
-)(VariableDropdown)
+const connector = connect(mstp, mdtp)
+
+export default connector(VariableDropdown)

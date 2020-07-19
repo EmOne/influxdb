@@ -8,13 +8,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/influxdata/flux/parser"
-	"github.com/influxdata/influxdb/notification"
-
-	"github.com/influxdata/influxdb/mock"
-
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/notification/check"
-	influxTesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
+	"github.com/influxdata/influxdb/v2/notification"
+	"github.com/influxdata/influxdb/v2/notification/check"
+	"github.com/influxdata/influxdb/v2/query/fluxlang"
+	influxTesting "github.com/influxdata/influxdb/v2/testing"
 )
 
 const (
@@ -156,7 +155,7 @@ func TestValidCheck(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		got := c.src.Valid()
+		got := c.src.Valid(fluxlang.DefaultService)
 		influxTesting.ErrorsEqual(t, got, c.err)
 	}
 }

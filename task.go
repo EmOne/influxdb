@@ -10,8 +10,7 @@ import (
 
 	"github.com/influxdata/flux/ast"
 	"github.com/influxdata/flux/ast/edit"
-	"github.com/influxdata/flux/parser"
-	"github.com/influxdata/influxdb/task/options"
+	"github.com/influxdata/influxdb/v2/task/options"
 )
 
 const (
@@ -29,15 +28,21 @@ var (
 	TaskSystemType = "system"
 )
 
+type contextKey string
+
+const (
+	taskAuthKey contextKey = "taskAuth"
+)
+
 // TODO: these are temporary functions until we can work through optimizing auth
 // FindTaskWithAuth adds a auth hint for lookup of tasks
 func FindTaskWithoutAuth(ctx context.Context) context.Context {
-	return context.WithValue(ctx, "taskAuth", "omit")
+	return context.WithValue(ctx, taskAuthKey, "omit")
 }
 
 // FindTaskAuthRequired retrieves the taskAuth hint
 func FindTaskAuthRequired(ctx context.Context) bool {
-	val, ok := ctx.Value("taskAuth").(string)
+	val, ok := ctx.Value(taskAuthKey).(string)
 	return !(ok && val == "omit")
 }
 
@@ -267,7 +272,7 @@ func (t *TaskUpdate) Validate() error {
 	case !t.Options.Every.IsZero() && t.Options.Cron != "":
 		return errors.New("cannot specify both every and cron")
 	case !t.Options.Every.IsZero():
-		if _, err := parser.ParseSignedDuration(t.Options.Every.String()); err != nil {
+		if _, err := options.ParseSignedDuration(t.Options.Every.String()); err != nil {
 			return fmt.Errorf("every: %s is invalid", err)
 		}
 	case t.Options.Offset != nil && !t.Options.Offset.IsZero():
@@ -284,7 +289,13 @@ func (t *TaskUpdate) Validate() error {
 
 // safeParseSource calls the Flux parser.ParseSource function
 // and is guaranteed not to panic.
-func safeParseSource(f string) (pkg *ast.Package, err error) {
+func safeParseSource(parser FluxLanguageService, f string) (pkg *ast.Package, err error) {
+	if parser == nil {
+		return nil, &Error{
+			Code: EInternal,
+			Msg:  "flux parser is not configured; updating a task requires the flux parser to be set",
+		}
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = &Error{
@@ -294,25 +305,21 @@ func safeParseSource(f string) (pkg *ast.Package, err error) {
 		}
 	}()
 
-	pkg = parser.ParseSource(f)
-	return pkg, err
+	return parser.Parse(f)
 }
 
 // UpdateFlux updates the TaskUpdate to go from updating options to updating a flux string, that now has those updated options in it
 // It zeros the options in the TaskUpdate.
-func (t *TaskUpdate) UpdateFlux(oldFlux string) (err error) {
+func (t *TaskUpdate) UpdateFlux(parser FluxLanguageService, oldFlux string) (err error) {
 	if t.Flux != nil && *t.Flux != "" {
 		oldFlux = *t.Flux
 	}
 	toDelete := map[string]struct{}{}
-	parsedPKG, err := safeParseSource(oldFlux)
+	parsedPKG, err := safeParseSource(parser, oldFlux)
 	if err != nil {
 		return err
 	}
 
-	if ast.Check(parsedPKG) > 0 {
-		return ast.GetError(parsedPKG)
-	}
 	parsed := parsedPKG.Files[0]
 	if !t.Options.Every.IsZero() && t.Options.Cron != "" {
 		return errors.New("cannot specify both cron and every")

@@ -1,16 +1,17 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {withRouter, WithRouterProps} from 'react-router'
-import {connect} from 'react-redux'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
+import {connect, ConnectedProps} from 'react-redux'
 import {isEmpty} from 'lodash'
 
 // Components
 import {Button, EmptyState, Sort} from '@influxdata/clockface'
 import SearchWidget from 'src/shared/components/search_widget/SearchWidget'
-import SettingsTabbedPageHeader from 'src/settings/components/SettingsTabbedPageHeader'
+import TabbedPageHeader from 'src/shared/components/tabbed_page/TabbedPageHeader'
 import ScraperList from 'src/scrapers/components/ScraperList'
 import NoBucketsWarning from 'src/buckets/components/NoBucketsWarning'
 import FilterList from 'src/shared/components/FilterList'
+import ResourceSortDropdown from 'src/shared/components/resource_sort_dropdown/ResourceSortDropdown'
 
 // Actions
 import {updateScraper, deleteScraper} from 'src/scrapers/actions/thunks'
@@ -26,33 +27,22 @@ import {
   ComponentColor,
   ComponentStatus,
 } from '@influxdata/clockface'
-import {AppState, Bucket, Scraper, Organization, ResourceType} from 'src/types'
+import {AppState, Bucket, Scraper, ResourceType} from 'src/types'
+import {ScraperSortKey} from 'src/shared/components/resource_sort_dropdown/generateSortItems'
 
 // Selectors
 import {getOrg} from 'src/organizations/selectors'
 import {getAll} from 'src/resources/selectors'
 
-interface StateProps {
-  scrapers: Scraper[]
-  buckets: Bucket[]
-  org: Organization
-}
-
-interface DispatchProps {
-  onUpdateScraper: typeof updateScraper
-  onDeleteScraper: typeof deleteScraper
-}
-
-type Props = StateProps & DispatchProps & WithRouterProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps & RouteComponentProps<{orgID: string}>
 
 interface State {
   searchTerm: string
-  sortKey: SortKey
+  sortKey: ScraperSortKey
   sortDirection: Sort
   sortType: SortTypes
 }
-
-type SortKey = keyof Scraper
 
 const FilterScrapers = FilterList<Scraper>()
 
@@ -73,16 +63,31 @@ class Scrapers extends PureComponent<Props, State> {
     const {searchTerm, sortKey, sortDirection, sortType} = this.state
     const {scrapers} = this.props
 
+    const leftHeaderItems = (
+      <>
+        <SearchWidget
+          placeholderText="Filter scrapers..."
+          searchTerm={searchTerm}
+          onSearch={this.handleFilterChange}
+        />
+        <ResourceSortDropdown
+          resourceType={ResourceType.Scrapers}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          sortType={sortType}
+          onSelect={this.handleSort}
+        />
+      </>
+    )
+
     return (
       <>
-        <SettingsTabbedPageHeader>
-          <SearchWidget
-            placeholderText="Filter scrapers..."
-            searchTerm={searchTerm}
-            onSearch={this.handleFilterChange}
-          />
-          {this.createScraperButton('create-scraper-button-header')}
-        </SettingsTabbedPageHeader>
+        <TabbedPageHeader
+          childrenLeft={leftHeaderItems}
+          childrenRight={this.createScraperButton(
+            'create-scraper-button-header'
+          )}
+        />
         <NoBucketsWarning visible={this.hasNoBuckets} resourceName="Scrapers" />
         <FilterScrapers
           searchTerm={searchTerm}
@@ -98,7 +103,6 @@ class Scrapers extends PureComponent<Props, State> {
               sortKey={sortKey}
               sortDirection={sortDirection}
               sortType={sortType}
-              onClickColumn={this.handleClickColumn}
             />
           )}
         </FilterScrapers>
@@ -106,9 +110,12 @@ class Scrapers extends PureComponent<Props, State> {
     )
   }
 
-  private handleClickColumn = (nextSort: Sort, sortKey: SortKey) => {
-    const sortType = SortTypes.String
-    this.setState({sortKey, sortDirection: nextSort, sortType})
+  private handleSort = (
+    sortKey: ScraperSortKey,
+    sortDirection: Sort,
+    sortType: SortTypes
+  ): void => {
+    this.setState({sortKey, sortDirection, sortType})
   }
 
   private get hasNoBuckets(): boolean {
@@ -177,13 +184,13 @@ class Scrapers extends PureComponent<Props, State> {
   }
 
   private handleShowOverlay = () => {
-    const {router, org} = this.props
+    const {history, org} = this.props
 
     if (this.hasNoBuckets) {
       return
     }
 
-    router.push(`/orgs/${org.id}/load-data/scrapers/new`)
+    history.push(`/orgs/${org.id}/load-data/scrapers/new`)
   }
 
   private handleFilterChange = (searchTerm: string) => {
@@ -191,18 +198,17 @@ class Scrapers extends PureComponent<Props, State> {
   }
 }
 
-const mstp = (state: AppState): StateProps => ({
+const mstp = (state: AppState) => ({
   scrapers: getAll<Scraper>(state, ResourceType.Scrapers),
   buckets: getAll<Bucket>(state, ResourceType.Buckets),
   org: getOrg(state),
 })
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onDeleteScraper: deleteScraper,
   onUpdateScraper: updateScraper,
 }
 
-export default connect<StateProps, DispatchProps>(
-  mstp,
-  mdtp
-)(withRouter(Scrapers))
+const connector = connect(mstp, mdtp)
+
+export default connector(withRouter(Scrapers))

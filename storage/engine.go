@@ -12,23 +12,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/logger"
-	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/pkg/limiter"
-	"github.com/influxdata/influxdb/storage/wal"
-	"github.com/influxdata/influxdb/tsdb"
-	"github.com/influxdata/influxdb/tsdb/cursors"
-	"github.com/influxdata/influxdb/tsdb/seriesfile"
-	"github.com/influxdata/influxdb/tsdb/tsi1"
-	"github.com/influxdata/influxdb/tsdb/tsm1"
-	"github.com/influxdata/influxdb/tsdb/value"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/logger"
+	"github.com/influxdata/influxdb/v2/models"
+	"github.com/influxdata/influxdb/v2/pkg/limiter"
+	"github.com/influxdata/influxdb/v2/storage/wal"
+	"github.com/influxdata/influxdb/v2/tsdb"
+	"github.com/influxdata/influxdb/v2/tsdb/cursors"
+	"github.com/influxdata/influxdb/v2/tsdb/seriesfile"
+	"github.com/influxdata/influxdb/v2/tsdb/tsi1"
+	"github.com/influxdata/influxdb/v2/tsdb/tsm1"
+	"github.com/influxdata/influxdb/v2/tsdb/value"
 	"github.com/influxdata/influxql"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 // Static objects to prevent small allocs.
@@ -63,6 +64,8 @@ type Engine struct {
 	retentionEnforcerLimiter runnable
 
 	defaultMetricLabels prometheus.Labels
+
+	writePointsValidationEnabled bool
 
 	// Tracks all goroutines started by the Engine.
 	wg sync.WaitGroup
@@ -156,6 +159,21 @@ func WithCompactionSemaphore(s influxdb.Semaphore) Option {
 	}
 }
 
+// WithWritePointsValidationEnabled sets whether written points should be validated.
+func WithWritePointsValidationEnabled(v bool) Option {
+	return func(e *Engine) {
+		e.writePointsValidationEnabled = v
+	}
+}
+
+// WithPageFaultLimiter allows the caller to set the limiter for restricting
+// the frequency of page faults.
+func WithPageFaultLimiter(limiter *rate.Limiter) Option {
+	return func(e *Engine) {
+		e.engine.WithPageFaultLimiter(limiter)
+	}
+}
+
 // NewEngine initialises a new storage engine, including a series file, index and
 // TSM engine.
 func NewEngine(path string, c Config, options ...Option) *Engine {
@@ -164,6 +182,8 @@ func NewEngine(path string, c Config, options ...Option) *Engine {
 		path:                path,
 		defaultMetricLabels: prometheus.Labels{},
 		logger:              zap.NewNop(),
+
+		writePointsValidationEnabled: true,
 	}
 
 	// Initialize series file.
@@ -328,6 +348,20 @@ func (e *Engine) replayWAL() error {
 	return err
 }
 
+// EnableCompactions allows the series file, index, & underlying engine to compact.
+func (e *Engine) EnableCompactions() {
+	e.sfile.EnableCompactions()
+	e.index.EnableCompactions()
+	e.engine.SetCompactionsEnabled(true)
+}
+
+// DisableCompactions disables compactions in the series file, index, & engine.
+func (e *Engine) DisableCompactions() {
+	e.sfile.DisableCompactions()
+	e.index.DisableCompactions()
+	e.engine.SetCompactionsEnabled(false)
+}
+
 // runRetentionEnforcer runs the retention enforcer in a separate goroutine.
 //
 // Currently this just runs on an interval, but in the future we will add the
@@ -468,45 +502,48 @@ func (e *Engine) WritePoints(ctx context.Context, points []models.Point) error {
 	}
 
 	for iter := collection.Iterator(); iter.Next(); {
-		tags := iter.Tags()
+		// Skip validation if it has already been performed previously in the call stack.
+		if e.writePointsValidationEnabled {
+			tags := iter.Tags()
 
-		// Not enough tags present.
-		if tags.Len() < 2 {
-			dropPoint(iter.Key(), fmt.Sprintf("missing required tags: parsed tags: %q", tags))
-			continue
-		}
+			// Not enough tags present.
+			if tags.Len() < 2 {
+				dropPoint(iter.Key(), fmt.Sprintf("missing required tags: parsed tags: %q", tags))
+				continue
+			}
 
-		// First tag key is not measurement tag.
-		if !bytes.Equal(tags[0].Key, models.MeasurementTagKeyBytes) {
-			dropPoint(iter.Key(), fmt.Sprintf("missing required measurement tag as first tag, got: %q", tags[0].Key))
-			continue
-		}
+			// First tag key is not measurement tag.
+			if !bytes.Equal(tags[0].Key, models.MeasurementTagKeyBytes) {
+				dropPoint(iter.Key(), fmt.Sprintf("missing required measurement tag as first tag, got: %q", tags[0].Key))
+				continue
+			}
 
-		fkey, fval := tags[len(tags)-1].Key, tags[len(tags)-1].Value
+			fkey, fval := tags[len(tags)-1].Key, tags[len(tags)-1].Value
 
-		// Last tag key is not field tag.
-		if !bytes.Equal(fkey, models.FieldKeyTagKeyBytes) {
-			dropPoint(iter.Key(), fmt.Sprintf("missing required field key tag as last tag, got: %q", tags[0].Key))
-			continue
-		}
+			// Last tag key is not field tag.
+			if !bytes.Equal(fkey, models.FieldKeyTagKeyBytes) {
+				dropPoint(iter.Key(), fmt.Sprintf("missing required field key tag as last tag, got: %q", tags[0].Key))
+				continue
+			}
 
-		// The value representing the underlying field key is invalid if it's "time".
-		if bytes.Equal(fval, timeBytes) {
-			dropPoint(iter.Key(), fmt.Sprintf("invalid field key: input field %q is invalid", timeBytes))
-			continue
-		}
+			// The value representing the underlying field key is invalid if it's "time".
+			if bytes.Equal(fval, timeBytes) {
+				dropPoint(iter.Key(), fmt.Sprintf("invalid field key: input field %q is invalid", timeBytes))
+				continue
+			}
 
-		// Filter out any tags with key equal to "time": they are invalid.
-		if tags.Get(timeBytes) != nil {
-			dropPoint(iter.Key(), fmt.Sprintf("invalid tag key: input tag %q on measurement %q is invalid", timeBytes, iter.Name()))
-			continue
-		}
+			// Filter out any tags with key equal to "time": they are invalid.
+			if tags.Get(timeBytes) != nil {
+				dropPoint(iter.Key(), fmt.Sprintf("invalid tag key: input tag %q on measurement %q is invalid", timeBytes, iter.Name()))
+				continue
+			}
 
-		// Drop any point with invalid unicode characters in any of the tag keys or values.
-		// This will also cover validating the value used to represent the field key.
-		if !models.ValidTagTokens(tags) {
-			dropPoint(iter.Key(), fmt.Sprintf("key contains invalid unicode: %q", iter.Key()))
-			continue
+			// Drop any point with invalid unicode characters in any of the tag keys or values.
+			// This will also cover validating the value used to represent the field key.
+			if !models.ValidTagTokens(tags) {
+				dropPoint(iter.Key(), fmt.Sprintf("key contains invalid unicode: %q", iter.Key()))
+				continue
+			}
 		}
 
 		collection.Copy(j, iter.Index())

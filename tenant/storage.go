@@ -2,12 +2,11 @@ package tenant
 
 import (
 	"context"
-	"encoding/json"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/kv"
-	"github.com/influxdata/influxdb/snowflake"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/snowflake"
 )
 
 const MaxIDGenerationN = 100
@@ -19,25 +18,12 @@ type Store struct {
 	urmByUserIndex *kv.Index
 }
 
-func NewStore(kvStore kv.Store) (*Store, error) {
-	st := &Store{
-		kvStore: kvStore,
-		IDGen:   snowflake.NewDefaultIDGenerator(),
-		urmByUserIndex: kv.NewIndex(kv.NewIndexMapping(
-			urmBucket,
-			urmByUserIndexBucket,
-			func(v []byte) ([]byte, error) {
-				var urm influxdb.UserResourceMapping
-				if err := json.Unmarshal(v, &urm); err != nil {
-					return nil, err
-				}
-
-				id, _ := urm.UserID.Encode()
-				return id, nil
-			},
-		), kv.WithIndexReadPathEnabled),
+func NewStore(kvStore kv.Store) *Store {
+	return &Store{
+		kvStore:        kvStore,
+		IDGen:          snowflake.NewDefaultIDGenerator(),
+		urmByUserIndex: kv.NewIndex(kv.URMByUserIndexMapping, kv.WithIndexReadPathEnabled),
 	}
-	return st, st.setup()
 }
 
 // View opens up a transaction that will not write to any data. Implementing interfaces
@@ -49,43 +35,6 @@ func (s *Store) View(ctx context.Context, fn func(kv.Tx) error) error {
 // Update opens up a transaction that will mutate data.
 func (s *Store) Update(ctx context.Context, fn func(kv.Tx) error) error {
 	return s.kvStore.Update(ctx, fn)
-}
-
-func (s *Store) setup() error {
-	return s.Update(context.Background(), func(tx kv.Tx) error {
-		if _, err := tx.Bucket(userBucket); err != nil {
-			return err
-		}
-
-		if _, err := tx.Bucket(userIndex); err != nil {
-			return err
-		}
-
-		if _, err := tx.Bucket(userpasswordBucket); err != nil {
-			return err
-		}
-
-		if _, err := tx.Bucket(urmBucket); err != nil {
-			return err
-		}
-		if _, err := tx.Bucket(organizationBucket); err != nil {
-			return err
-		}
-
-		if _, err := tx.Bucket(organizationIndex); err != nil {
-			return err
-		}
-
-		if _, err := tx.Bucket(bucketBucket); err != nil {
-			return err
-		}
-
-		if _, err := tx.Bucket(bucketIndex); err != nil {
-			return err
-		}
-
-		return nil
-	})
 }
 
 // generateSafeID attempts to create ids for buckets

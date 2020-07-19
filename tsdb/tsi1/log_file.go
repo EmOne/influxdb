@@ -14,12 +14,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/pkg/bloom"
-	"github.com/influxdata/influxdb/pkg/lifecycle"
-	"github.com/influxdata/influxdb/pkg/mmap"
-	"github.com/influxdata/influxdb/tsdb"
-	"github.com/influxdata/influxdb/tsdb/seriesfile"
+	"github.com/influxdata/influxdb/v2/models"
+	"github.com/influxdata/influxdb/v2/pkg/bloom"
+	"github.com/influxdata/influxdb/v2/pkg/lifecycle"
+	"github.com/influxdata/influxdb/v2/pkg/mmap"
+	"github.com/influxdata/influxdb/v2/tsdb"
+	"github.com/influxdata/influxdb/v2/tsdb/seriesfile"
 )
 
 // Log errors.
@@ -1054,6 +1054,7 @@ func (f *LogFile) writeMeasurementBlockTo(w io.Writer, names []string, info *log
 		mm := f.mms[name]
 		mmInfo := info.mms[name]
 		assert(mmInfo != nil, "measurement info not found")
+		//lint:ignore SA5011 mmInfo is flagged as being possibly nil because of the assertion
 		mw.Add(mm.name, mm.deleted, mmInfo.offset, mmInfo.size, mm.seriesIDs())
 	}
 

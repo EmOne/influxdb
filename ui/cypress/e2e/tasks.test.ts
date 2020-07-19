@@ -54,9 +54,25 @@ from(bucket: "${name}"{rightarrow}
 
     cy.getByTestID('task-save-btn').click()
 
+    cy.getByTestID('notification-success--dismiss').click()
+
     cy.getByTestID('task-card')
       .should('have.length', 1)
       .and('contain', taskName)
+
+    // TODO: extend to create from template overlay
+    cy.getByTestID('add-resource-dropdown--button').click()
+    cy.getByTestID('add-resource-dropdown--template').click()
+    cy.getByTestID('task-import-template--overlay').within(() => {
+      cy.get('.cf-overlay--dismiss').click()
+    })
+
+    // TODO: extend to create a template from JSON
+    cy.getByTestID('add-resource-dropdown--button').click()
+    cy.getByTestID('add-resource-dropdown--import').click()
+    cy.getByTestID('task-import--overlay').within(() => {
+      cy.get('.cf-overlay--dismiss').click()
+    })
   })
   // this test is broken due to a failure on the post route
   it.skip('can create a task using http.post', () => {
@@ -327,7 +343,10 @@ http.post(
       // verify that it is the correct data
       cy.getByInputValue(secondTask)
 
-      cy.get('div.cf-nav--item.active').click()
+      cy.get('.cf-tree-nav--item__active').within(() => {
+        // Get the element that has a click handler within the nav item
+        cy.get('.cf-tree-nav--item-block').click()
+      })
       // navigate back to the first one to verify that the name is correct
       cy.getByTestID('task-card--name')
         .contains(firstTask)

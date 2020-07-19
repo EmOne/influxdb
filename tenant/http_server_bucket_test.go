@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi"
-	"github.com/influxdata/influxdb"
-	ihttp "github.com/influxdata/influxdb/http"
-	"github.com/influxdata/influxdb/tenant"
-	itesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	ihttp "github.com/influxdata/influxdb/v2/http"
+	"github.com/influxdata/influxdb/v2/tenant"
+	itesting "github.com/influxdata/influxdb/v2/testing"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -20,12 +20,8 @@ func initBucketHttpService(f itesting.BucketFields, t *testing.T) (influxdb.Buck
 	if err != nil {
 		t.Fatal(err)
 	}
-	storage, err := tenant.NewStore(s)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	svc := tenant.NewService(storage)
+	svc := tenant.NewService(tenant.NewStore(s))
 
 	ctx := context.Background()
 	for _, o := range f.Organizations {
@@ -39,7 +35,7 @@ func initBucketHttpService(f itesting.BucketFields, t *testing.T) (influxdb.Buck
 		}
 	}
 
-	handler := tenant.NewHTTPBucketHandler(zaptest.NewLogger(t), svc, nil, nil)
+	handler := tenant.NewHTTPBucketHandler(zaptest.NewLogger(t), svc, nil, nil, nil)
 	r := chi.NewRouter()
 	r.Mount(handler.Prefix(), handler)
 	server := httptest.NewServer(r)

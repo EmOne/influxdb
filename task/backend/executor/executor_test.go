@@ -10,17 +10,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/mock/gomock"
 	"github.com/influxdata/flux"
-	"github.com/influxdata/influxdb"
-	icontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/inmem"
-	"github.com/influxdata/influxdb/kit/prom"
-	"github.com/influxdata/influxdb/kit/prom/promtest"
-	tracetest "github.com/influxdata/influxdb/kit/tracing/testing"
-	"github.com/influxdata/influxdb/kv"
-	"github.com/influxdata/influxdb/query"
-	"github.com/influxdata/influxdb/task/backend"
-	"github.com/influxdata/influxdb/task/backend/scheduler"
+	"github.com/influxdata/influxdb/v2"
+	icontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/inmem"
+	"github.com/influxdata/influxdb/v2/kit/prom"
+	"github.com/influxdata/influxdb/v2/kit/prom/promtest"
+	tracetest "github.com/influxdata/influxdb/v2/kit/tracing/testing"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/kv/migration/all"
+	"github.com/influxdata/influxdb/v2/query"
+	"github.com/influxdata/influxdb/v2/query/fluxlang"
+	"github.com/influxdata/influxdb/v2/task/backend"
+	"github.com/influxdata/influxdb/v2/task/backend/executor/mock"
+	"github.com/influxdata/influxdb/v2/task/backend/scheduler"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go"
 	"go.uber.org/zap/zaptest"
@@ -52,17 +56,32 @@ func taskExecutorSystem(t *testing.T) tes {
 		qs  = query.QueryServiceBridge{
 			AsyncQueryService: aqs,
 		}
-		i           = kv.NewService(zaptest.NewLogger(t), inmem.NewKVStore())
-		tcs         = &taskControlService{TaskControlService: i}
-		ex, metrics = NewExecutor(zaptest.NewLogger(t), qs, i, i, tcs)
+		ctx    = context.Background()
+		logger = zaptest.NewLogger(t)
+		store  = inmem.NewKVStore()
+	)
+
+	if err := all.Up(ctx, logger, store); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := gomock.NewController(t)
+	ps := mock.NewMockPermissionService(ctrl)
+	ps.EXPECT().FindPermissionForUser(gomock.Any(), gomock.Any()).Return(influxdb.PermissionSet{}, nil).AnyTimes()
+	var (
+		svc = kv.NewService(logger, store, kv.ServiceConfig{
+			FluxLanguageService: fluxlang.DefaultService,
+		})
+
+		tcs         = &taskControlService{TaskControlService: svc}
+		ex, metrics = NewExecutor(zaptest.NewLogger(t), qs, ps, svc, tcs)
 	)
 	return tes{
 		svc:     aqs,
 		ex:      ex,
 		metrics: metrics,
-		i:       i,
+		i:       svc,
 		tcs:     tcs,
-		tc:      createCreds(t, i),
+		tc:      createCreds(t, svc),
 	}
 }
 
@@ -444,9 +463,14 @@ func testIteratorFailure(t *testing.T) {
 
 	// replace iterator exhaust function with one which errors
 	tes.ex.workerPool = sync.Pool{New: func() interface{} {
-		return &worker{tes.ex, func(flux.Result) error {
-			return errors.New("something went wrong exhausting iterator")
-		}}
+		return &worker{
+			e: tes.ex,
+			exhaustResultIterators: func(flux.Result) error {
+				return errors.New("something went wrong exhausting iterator")
+			},
+			systemBuildCompiler:    NewASTCompiler,
+			nonSystemBuildCompiler: NewASTCompiler,
+		}
 	}}
 
 	script := fmt.Sprintf(fmtTestScript, t.Name())
@@ -525,6 +549,51 @@ func testErrorHandling(t *testing.T) {
 			t.Fatal("expected task to be deactivated after permanent error")
 		}
 	*/
+}
+
+func TestPromiseFailure(t *testing.T) {
+	t.Parallel()
+
+	tes := taskExecutorSystem(t)
+
+	var (
+		script = fmt.Sprintf(fmtTestScript, t.Name())
+		ctx    = icontext.SetAuthorizer(context.Background(), tes.tc.Auth)
+		span   = opentracing.GlobalTracer().StartSpan("test-span")
+	)
+	ctx = opentracing.ContextWithSpan(ctx, span)
+
+	task, err := tes.i.CreateTask(ctx, influxdb.TaskCreate{OrganizationID: tes.tc.OrgID, OwnerID: tes.tc.Auth.GetUserID(), Flux: script})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tes.i.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	promise, err := tes.ex.PromisedExecute(ctx, scheduler.ID(task.ID), time.Unix(123, 0), time.Unix(126, 0))
+	if err == nil {
+		t.Fatal("failed to error on promise create")
+	}
+
+	if promise != nil {
+		t.Fatalf("expected no promise but recieved one: %+v", promise)
+	}
+
+	runs, _, err := tes.i.FindRuns(context.Background(), influxdb.RunFilter{Task: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 runs on failed promise: got: %d, %#v", len(runs), runs[0])
+	}
+
+	if runs[0].Status != "failed" {
+		t.Fatal("failed to set failed state")
+	}
+
 }
 
 type taskControlService struct {

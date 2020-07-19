@@ -7,13 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/influxdata/influxdb/resource"
-
+	"github.com/influxdata/influxdb/v2/resource"
 	"go.uber.org/zap"
 
-	"github.com/influxdata/influxdb"
-	icontext "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/kit/tracing"
+	"github.com/influxdata/influxdb/v2"
+	icontext "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
 )
 
 const (
@@ -38,16 +37,6 @@ var ErrFailureGeneratingID = &influxdb.Error{
 
 var _ influxdb.OrganizationService = (*Service)(nil)
 var _ influxdb.OrganizationOperationLogService = (*Service)(nil)
-
-func (s *Service) initializeOrgs(ctx context.Context, tx Tx) error {
-	if _, err := tx.Bucket(organizationBucket); err != nil {
-		return err
-	}
-	if _, err := tx.Bucket(organizationIndex); err != nil {
-		return err
-	}
-	return nil
-}
 
 // FindOrganizationByID retrieves a organization by id.
 func (s *Service) FindOrganizationByID(ctx context.Context, id influxdb.ID) (*influxdb.Organization, error) {
@@ -237,6 +226,29 @@ func (s *Service) FindOrganizations(ctx context.Context, filter influxdb.Organiz
 	}
 
 	os := []*influxdb.Organization{}
+
+	if filter.UserID != nil {
+		// find urms for orgs with this user
+		urms, _, err := s.FindUserResourceMappings(ctx, influxdb.UserResourceMappingFilter{
+			UserID:       *filter.UserID,
+			ResourceType: influxdb.OrgsResourceType,
+		}, opt...)
+
+		if err != nil {
+			return nil, 0, err
+		}
+		// find orgs by the urm's resource ids.
+		for _, urm := range urms {
+			o, err := s.FindOrganizationByID(ctx, urm.ResourceID)
+			if err == nil {
+				// if there is an error then this is a crufty urm and we should just move on
+				os = append(os, o)
+			}
+		}
+
+		return os, len(os), nil
+	}
+
 	filterFn := filterOrganizationsFn(filter)
 	err := s.kv.View(ctx, func(tx Tx) error {
 		return forEachOrganization(ctx, tx, func(o *influxdb.Organization) bool {

@@ -9,14 +9,15 @@ import {
   Action as QueryBuilderAction,
 } from 'src/timeMachine/actions/queryBuilder'
 import {convertCheckToCustom} from 'src/alerting/actions/alertBuilder'
+import {setDashboardTimeRange} from 'src/dashboards/actions/ranges'
 
 // Selectors
-import {getTimeRange} from 'src/dashboards/selectors'
 import {getActiveQuery} from 'src/timeMachine/selectors'
 
 // Utils
 import {createView} from 'src/views/helpers'
 import {createCheckQueryFromAlertBuilder} from 'src/alerting/utils/customCheck'
+import {currentContext} from 'src/shared/selectors/currentContext'
 
 // Types
 import {TimeMachineState} from 'src/timeMachine/reducers'
@@ -45,7 +46,6 @@ export type Action =
   | SetActiveTimeMachineAction
   | SetActiveTabAction
   | SetNameAction
-  | SetTimeRangeAction
   | SetAutoRefreshAction
   | SetTypeAction
   | SetActiveQueryText
@@ -91,6 +91,7 @@ export type Action =
   | SetYDomainAction
   | SetXAxisLabelAction
   | SetShadeBelowAction
+  | SetHoverDimensionAction
   | ReturnType<typeof toggleVisOptions>
 
 type ExternalActions =
@@ -139,18 +140,10 @@ export const setName = (name: string): SetNameAction => ({
   payload: {name},
 })
 
-interface SetTimeRangeAction {
-  type: 'SET_TIME_RANGE'
-  payload: {timeRange: TimeRange}
-}
+export const setTimeRange = (timeRange: TimeRange) => (dispatch, getState) => {
+  const contextID = currentContext(getState())
 
-const setTimeRangeSync = (timeRange: TimeRange): SetTimeRangeAction => ({
-  type: 'SET_TIME_RANGE',
-  payload: {timeRange},
-})
-
-export const setTimeRange = (timeRange: TimeRange) => dispatch => {
-  dispatch(setTimeRangeSync(timeRange))
+  dispatch(setDashboardTimeRange(contextID, timeRange))
   dispatch(saveAndExecuteQueries())
   dispatch(reloadTagSelectors())
 }
@@ -561,6 +554,18 @@ export const setShadeBelow = (shadeBelow: boolean): SetShadeBelowAction => ({
   payload: {shadeBelow},
 })
 
+interface SetHoverDimensionAction {
+  type: 'SET_HOVER_DIMENSION'
+  payload: {hoverDimension}
+}
+
+export const SetHoverDimension = (
+  hoverDimension: 'auto' | 'x' | 'y' | 'xy'
+): SetHoverDimensionAction => ({
+  type: 'SET_HOVER_DIMENSION',
+  payload: {hoverDimension},
+})
+
 interface SetBinSizeAction {
   type: 'SET_BIN_SIZE'
   payload: {binSize: number}
@@ -662,17 +667,12 @@ export const setXAxisLabel = (xAxisLabel: string): SetXAxisLabelAction => ({
   payload: {xAxisLabel},
 })
 
-export const loadNewVEO = (dashboardID: string) => (
-  dispatch: Dispatch<Action | ExternalActions>,
-  getState: GetState
+export const loadNewVEO = () => (
+  dispatch: Dispatch<Action | ExternalActions>
 ): void => {
-  const state = getState()
-  const timeRange = getTimeRange(state, dashboardID)
-
   dispatch(
     setActiveTimeMachine('veo', {
       view: createView<XYViewProperties>('xy'),
-      timeRange,
     })
   )
 }

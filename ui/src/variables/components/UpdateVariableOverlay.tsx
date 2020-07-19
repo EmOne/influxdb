@@ -1,8 +1,7 @@
 // Libraries
 import React, {PureComponent, FormEvent} from 'react'
-import _ from 'lodash'
-import {connect} from 'react-redux'
-import {withRouter, WithRouterProps} from 'react-router'
+import {connect, ConnectedProps} from 'react-redux'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
 
 // Components
 import {
@@ -39,16 +38,9 @@ interface State {
   hasValidArgs: boolean
 }
 
-interface StateProps {
-  variables: Variable[]
-  startVariable: Variable
-}
-
-interface DispatchProps {
-  onUpdateVariable: typeof updateVariable
-}
-
-type Props = StateProps & DispatchProps & WithRouterProps
+type RouterProps = RouteComponentProps<{orgID: string; id: string}>
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = RouterProps & ReduxProps
 
 class UpdateVariableOverlay extends PureComponent<Props, State> {
   public state: State = {
@@ -61,7 +53,7 @@ class UpdateVariableOverlay extends PureComponent<Props, State> {
     const {workingVariable, hasValidArgs} = this.state
 
     return (
-      <Overlay visible={true}>
+      <Overlay visible={true} testID="edit-variable--overlay">
         <Overlay.Container maxWidth={1000}>
           <Overlay.Header title="Edit Variable" onDismiss={this.handleClose} />
           <Overlay.Body>
@@ -88,7 +80,11 @@ class UpdateVariableOverlay extends PureComponent<Props, State> {
                     <Form.Element label="Type" required={true}>
                       <Dropdown
                         button={(active, onClick) => (
-                          <Dropdown.Button active={active} onClick={onClick}>
+                          <Dropdown.Button
+                            active={active}
+                            onClick={onClick}
+                            testID="variable-type-dropdown--button"
+                          >
                             {this.typeDropdownLabel}
                           </Dropdown.Button>
                         )}
@@ -103,6 +99,7 @@ class UpdateVariableOverlay extends PureComponent<Props, State> {
                                 selected={
                                   v.type === workingVariable.arguments.type
                                 }
+                                testID={`variable-type-dropdown-${v.type}`}
                               >
                                 {v.label}
                               </Dropdown.Item>
@@ -245,29 +242,23 @@ class UpdateVariableOverlay extends PureComponent<Props, State> {
   }
 
   private handleClose = () => {
-    const {
-      router,
-      params: {orgID},
-    } = this.props
+    const {history, match} = this.props
 
-    router.push(`/orgs/${orgID}/settings/variables`)
+    history.push(`/orgs/${match.params.orgID}/settings/variables`)
   }
 }
 
-const mstp = (state: AppState, {params: {id}}: Props): StateProps => {
+const mstp = (state: AppState, {match}: RouterProps) => {
   const variables = getVariables(state)
-  const startVariable = variables.find(v => v.id === id)
+  const startVariable = variables.find(v => v.id === match.params.id)
 
   return {variables, startVariable}
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   onUpdateVariable: updateVariable,
 }
 
-export default withRouter(
-  connect<StateProps, DispatchProps>(
-    mstp,
-    mdtp
-  )(UpdateVariableOverlay)
-)
+const connector = connect(mstp, mdtp)
+
+export default withRouter(connector(UpdateVariableOverlay))

@@ -48,41 +48,31 @@ const ClientJSOverlay: FunctionComponent<Props> = props => {
         template={initializeClientCodeSnippet}
         label="JavaScript Code"
         defaults={{
-          server: 'server',
+          server: 'basepath',
           token: 'token',
+          org: 'orgID',
+          bucket: 'bucketID',
         }}
         values={{
           server,
+          org,
         }}
       />
       <h5>Write Data</h5>
       <TemplatedCodeSnippet
         template={writingDataLineProtocolCodeSnippet}
         label="JavaScript Code"
-        defaults={{
-          org: 'orgID',
-          bucket: 'bucketID',
-        }}
-        values={{
-          org,
-        }}
       />
       <h5>Execute a Flux query</h5>
       <TemplatedCodeSnippet
         template={executeQueryCodeSnippet}
         label="JavaScript Code"
-        defaults={{
-          org: 'orgID',
-        }}
-        values={{
-          org,
-        }}
       />
     </ClientLibraryOverlay>
   )
 }
 
-const mstp = (state: AppState): StateProps => {
+const mstp = (state: AppState) => {
   const {id} = getOrg(state)
 
   return {
@@ -91,7 +81,4 @@ const mstp = (state: AppState): StateProps => {
 }
 
 export {ClientJSOverlay}
-export default connect<StateProps, {}, Props>(
-  mstp,
-  null
-)(ClientJSOverlay)
+export default connect<StateProps, {}, Props>(mstp)(ClientJSOverlay)

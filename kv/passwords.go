@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 )
 
 // MinPasswordLength is the shortest password we allow into the system.
@@ -71,11 +71,6 @@ var (
 )
 
 var _ influxdb.PasswordsService = (*Service)(nil)
-
-func (s *Service) initializePasswords(ctx context.Context, tx Tx) error {
-	_, err := tx.Bucket(userpasswordBucket)
-	return err
-}
 
 // CompareAndSetPassword checks the password and if they match
 // updates to the new password.

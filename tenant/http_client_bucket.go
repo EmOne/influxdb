@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 )
 
 // BucketClientService connects to Influx via HTTP using tokens to manage buckets
@@ -99,7 +99,7 @@ func (s *BucketClientService) FindBuckets(ctx context.Context, filter influxdb.B
 	span, _ := tracing.StartSpanFromContext(ctx)
 	defer span.Finish()
 
-	params := findOptionParams(opt...)
+	params := influxdb.FindOptionParams(opt...)
 	if filter.OrganizationID != nil {
 		params = append(params, [2]string{"orgID", filter.OrganizationID.String()})
 	}

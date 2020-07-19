@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
 )
 
 var (
@@ -95,7 +95,7 @@ func (s *Store) GetUserByName(ctx context.Context, tx kv.Tx, n string) (*influxd
 
 	var id influxdb.ID
 	if err := id.Decode(uid); err != nil {
-		return nil, ErrCorruptID(err)
+		return nil, influxdb.ErrCorruptID(err)
 	}
 	return s.GetUser(ctx, tx, id)
 }
@@ -200,7 +200,7 @@ func (s *Store) UpdateUser(ctx context.Context, tx kv.Tx, id influxdb.ID, upd in
 		return nil, err
 	}
 
-	if upd.Name != nil {
+	if upd.Name != nil && *upd.Name != u.Name {
 		if err := s.uniqueUserName(ctx, tx, *upd.Name); err != nil {
 			return nil, err
 		}
@@ -270,13 +270,29 @@ func (s *Store) DeleteUser(ctx context.Context, tx kv.Tx, id influxdb.ID) error 
 		return ErrInternalServiceError(err)
 	}
 
-	// clean up users password
+	// Clean up users password.
 	ub, err := tx.Bucket(userpasswordBucket)
 	if err != nil {
 		return UnavailablePasswordServiceError(err)
 	}
+	if err := ub.Delete(encodedID); err != nil {
+		return err
+	}
 
-	return ub.Delete(encodedID)
+	// Clean up user URMs.
+	urms, err := s.ListURMs(ctx, tx, influxdb.UserResourceMappingFilter{UserID: id})
+	if err != nil {
+		return err
+	}
+	// Do not fail fast on error.
+	// Try to avoid as much as possible the effects of partial deletion.
+	aggErr := NewAggregateError()
+	for _, urm := range urms {
+		if err := s.DeleteURM(ctx, tx, urm.ResourceID, urm.UserID); err != nil {
+			aggErr.Add(err)
+		}
+	}
+	return aggErr.Err()
 }
 
 func (s *Store) GetPassword(ctx context.Context, tx kv.Tx, id influxdb.ID) (string, error) {

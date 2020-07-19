@@ -1,11 +1,21 @@
 import {
+  getUserVariableNames,
   getVariables,
   getAllVariables,
   getVariable,
+  sortVariablesByName,
 } from 'src/variables/selectors'
 import {AppState} from 'src/types'
 
 const MOCKSTATE = ({
+  app: {
+    persisted: {
+      timeZone: 'UTC',
+    },
+  },
+  currentDashboard: {
+    id: '',
+  },
   resources: {
     variables: {
       byID: {
@@ -49,9 +59,19 @@ const MOCKSTATE = ({
 } as any) as AppState
 
 describe('VariableSelectors', () => {
+  describe('sortVariablesByName', () => {
+    it('should sort variables alphabetically', () => {
+      const vars = sortVariablesByName(getVariables(MOCKSTATE))
+
+      expect(vars.length).toEqual(2)
+      expect(vars[0].name).toEqual('1234')
+      expect(vars[1].name).toEqual('5678')
+    })
+  })
+
   describe('getVariable', () => {
     it('should grab a variable', () => {
-      const vardawg = getVariable(MOCKSTATE, '', '1234')
+      const vardawg = getVariable(MOCKSTATE, '1234')
 
       expect(vardawg.selected[0]).toEqual('abc')
       expect(vardawg.arguments.type).toEqual('constant')
@@ -59,14 +79,28 @@ describe('VariableSelectors', () => {
     })
 
     it('should hydrate a user selected option', () => {
-      const vardawg = getVariable(MOCKSTATE, 'qwerty', '1234')
+      const vardawg = getVariable(
+        {
+          ...MOCKSTATE,
+          currentDashboard: {
+            id: 'qwerty',
+          },
+        },
+        '1234'
+      )
 
       expect(vardawg.selected[0]).toEqual('def')
     })
 
     it('should contain a selection to a context', () => {
-      const vardawg = getVariable(MOCKSTATE, 'coleman', '1234')
-      const vardawgReturns = getVariable(MOCKSTATE, 'coleman', '5678')
+      const state = {
+        ...MOCKSTATE,
+        currentDashboard: {
+          id: 'coleman',
+        },
+      }
+      const vardawg = getVariable(state, '1234')
+      const vardawgReturns = getVariable(state, '5678')
 
       expect(vardawg.selected[0]).toEqual('ghi')
       expect(vardawgReturns.selected[0]).toEqual('abc')
@@ -75,7 +109,7 @@ describe('VariableSelectors', () => {
 
   describe('getVariables', () => {
     it('should load all user vars in the default order', () => {
-      const vars = getVariables(MOCKSTATE, '')
+      const vars = getVariables(MOCKSTATE)
 
       expect(vars.length).toEqual(2)
       expect(vars[0].name).toEqual('5678')
@@ -83,7 +117,13 @@ describe('VariableSelectors', () => {
     })
 
     it("should load all user vars in a context's order", () => {
-      const vars = getVariables(MOCKSTATE, 'qwerty')
+      const state = {
+        ...MOCKSTATE,
+        currentDashboard: {
+          id: 'qwerty',
+        },
+      }
+      const vars = getVariables(state)
 
       expect(vars.length).toEqual(2)
       expect(vars[0].name).toEqual('1234')
@@ -91,7 +131,13 @@ describe('VariableSelectors', () => {
     })
 
     it('should roll over to the default order', () => {
-      const vars = getVariables(MOCKSTATE, 'coleman')
+      const state = {
+        ...MOCKSTATE,
+        currentDashboard: {
+          id: 'coleman',
+        },
+      }
+      const vars = getVariables(state)
 
       expect(vars.length).toEqual(2)
       expect(vars[0].name).toEqual('5678')
@@ -101,7 +147,7 @@ describe('VariableSelectors', () => {
 
   describe('getAllVariables', () => {
     it('should load all user vars in the default order', () => {
-      const vars = getAllVariables(MOCKSTATE, '')
+      const vars = getAllVariables(MOCKSTATE)
 
       expect(vars.length).toEqual(4)
       expect(vars[0].name).toEqual('5678')
@@ -109,11 +155,43 @@ describe('VariableSelectors', () => {
     })
 
     it("should load all user vars in a context's order", () => {
-      const vars = getAllVariables(MOCKSTATE, 'qwerty')
+      const state = {
+        ...MOCKSTATE,
+        currentDashboard: {
+          id: 'qwerty',
+        },
+      }
+      const vars = getAllVariables(state)
 
       expect(vars.length).toEqual(4)
       expect(vars[0].name).toEqual('1234')
       expect(vars[1].name).toEqual('5678')
+    })
+
+    it('should respect chaos', () => {
+      const vars = getUserVariableNames(
+        ({
+          currentDashboard: {
+            id: 'qwerty',
+          },
+          resources: {
+            variables: {
+              allIDs: ['5678', '1234', 'abc'],
+              values: {
+                qwerty: {
+                  order: ['ghi', '1234', '5678', 'def'],
+                },
+              },
+            },
+          },
+        } as any) as AppState,
+        'qwerty'
+      )
+
+      expect(vars.length).toEqual(3)
+      expect(vars[0]).toEqual('1234')
+      expect(vars[1]).toEqual('5678')
+      expect(vars[2]).toEqual('abc')
     })
 
     // skipping this one as it requires some weird mocking

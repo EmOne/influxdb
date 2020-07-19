@@ -1,6 +1,6 @@
 // Libraries
 import React, {PureComponent} from 'react'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Components
 import {
@@ -8,79 +8,132 @@ import {
   ComponentColor,
   ComponentSize,
   ComponentStatus,
+  IconFont,
 } from '@influxdata/clockface'
 
 // Actions
 import {saveAndExecuteQueries} from 'src/timeMachine/actions/queries'
+import {notify} from 'src/shared/actions/notifications'
 
 // Utils
 import {getActiveTimeMachine, getActiveQuery} from 'src/timeMachine/selectors'
+import {event} from 'src/cloud/utils/reporting'
+import {queryCancelRequest} from 'src/shared/copy/notifications'
 
 // Types
-import {RemoteDataState} from 'src/types'
-import {AppState} from 'src/types'
+import {AppState, RemoteDataState} from 'src/types'
 
-interface StateProps {
-  submitButtonDisabled: boolean
-  queryStatus: RemoteDataState
+interface OwnProps {
+  text?: string
+  icon?: IconFont
+  testID?: string
 }
 
-interface DispatchProps {
-  onSubmit: typeof saveAndExecuteQueries
-}
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = OwnProps & ReduxProps
 
-type Props = StateProps & DispatchProps
+const DELAYTIME = 2000
 
-interface State {
-  didClick: boolean
-}
+class SubmitQueryButton extends PureComponent<Props> {
+  public static defaultProps = {
+    text: 'Submit',
+    testID: 'time-machine-submit-button',
+  }
 
-class SubmitQueryButton extends PureComponent<Props, State> {
-  public state: State = {didClick: false}
+  public state = {
+    timer: false,
+  }
 
-  public componentDidUpdate(prevProps: Props) {
+  private timer
+
+  public componentDidUpdate(prevProps) {
     if (
-      prevProps.queryStatus === RemoteDataState.Loading &&
-      this.props.queryStatus === RemoteDataState.Done
+      this.props.queryStatus !== prevProps.queryStatus &&
+      prevProps.queryStatus === RemoteDataState.Loading
     ) {
-      this.setState({didClick: false})
+      if (this.timer) {
+        clearTimeout(this.timer)
+        delete this.timer
+      }
+
+      this.setState({timer: false})
     }
   }
 
   public render() {
+    const {text, queryStatus, icon, testID} = this.props
+
+    if (queryStatus === RemoteDataState.Loading && this.state.timer === true) {
+      return (
+        <Button
+          text="Cancel"
+          icon={icon}
+          size={ComponentSize.Small}
+          status={ComponentStatus.Default}
+          onClick={this.handleCancelClick}
+          color={ComponentColor.Danger}
+          testID={testID}
+          style={{width: '100px'}}
+        />
+      )
+    }
     return (
       <Button
-        text="Submit"
+        text={text}
+        icon={icon}
         size={ComponentSize.Small}
         status={this.buttonStatus}
         onClick={this.handleClick}
         color={ComponentColor.Primary}
-        testID="time-machine-submit-button"
+        testID={testID}
+        style={{width: '100px'}}
       />
     )
   }
 
   private get buttonStatus(): ComponentStatus {
     const {queryStatus, submitButtonDisabled} = this.props
-    const {didClick} = this.state
 
     if (submitButtonDisabled) {
       return ComponentStatus.Disabled
     }
 
-    if (queryStatus === RemoteDataState.Loading && didClick) {
-      // Only show loading state for button if it was just clicked
+    if (queryStatus === RemoteDataState.Loading) {
       return ComponentStatus.Loading
     }
 
     return ComponentStatus.Default
   }
 
+  private abortController: AbortController
+
   private handleClick = (): void => {
-    this.props.onSubmit()
-    this.setState({didClick: true})
+    // Optimistic UI, set the state to loading when the event
+    // happens rather than when the event trickles down to execution
+    event('SubmitQueryButton click')
+    // We need to instantiate a new AbortController per request
+    // In order to allow for requests after cancellations:
+    // https://stackoverflow.com/a/56548348/7963795
+
+    this.timer = setTimeout(() => {
+      this.setState({timer: true})
+    }, DELAYTIME)
+    this.abortController = new AbortController()
+    this.props.onSubmit(this.abortController)
+  }
+
+  private handleCancelClick = (): void => {
+    if (this.props.onNotify) {
+      this.props.onNotify(queryCancelRequest())
+    }
+    if (this.abortController) {
+      this.abortController.abort()
+      this.abortController = null
+    }
   }
 }
+
+export {SubmitQueryButton}
 
 const mstp = (state: AppState) => {
   const submitButtonDisabled = getActiveQuery(state).text === ''
@@ -91,9 +144,9 @@ const mstp = (state: AppState) => {
 
 const mdtp = {
   onSubmit: saveAndExecuteQueries,
+  onNotify: notify,
 }
 
-export default connect<StateProps, DispatchProps>(
-  mstp,
-  mdtp
-)(SubmitQueryButton)
+const connector = connect(mstp, mdtp)
+
+export default connector(SubmitQueryButton)

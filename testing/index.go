@@ -8,7 +8,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/influxdata/influxdb/kv"
+	"github.com/influxdata/influxdb/v2/kv"
+	"github.com/influxdata/influxdb/v2/kv/migration"
 )
 
 const (
@@ -36,7 +37,22 @@ type someResourceStore struct {
 	ownerIDIndex *kv.Index
 }
 
-func newSomeResourceStore(ctx context.Context, store kv.Store) *someResourceStore {
+type tester interface {
+	Helper()
+	Fatal(...interface{})
+}
+
+func newSomeResourceStore(t tester, ctx context.Context, store kv.SchemaStore) *someResourceStore {
+	t.Helper()
+
+	if err := migration.CreateBuckets("create the aresource bucket", []byte(someResourceBucket)).Up(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := kv.NewIndexMigration(mapping).Up(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+
 	return &someResourceStore{
 		store:        store,
 		ownerIDIndex: kv.NewIndex(mapping),
@@ -85,17 +101,21 @@ func newResource(id, owner string) someResource {
 }
 
 func newNResources(n int) (resources []someResource) {
+	return newNResourcesWithUserCount(n, 5)
+}
+
+func newNResourcesWithUserCount(n, userCount int) (resources []someResource) {
 	for i := 0; i < n; i++ {
 		var (
 			id    = fmt.Sprintf("resource %d", i)
-			owner = fmt.Sprintf("owner %d", i%5)
+			owner = fmt.Sprintf("owner %d", i%userCount)
 		)
 		resources = append(resources, newResource(id, owner))
 	}
 	return
 }
 
-func TestIndex(t *testing.T, store kv.Store) {
+func TestIndex(t *testing.T, store kv.SchemaStore) {
 	t.Run("Test_PopulateAndVerify", func(t *testing.T) {
 		testPopulateAndVerify(t, store)
 	})
@@ -105,11 +125,11 @@ func TestIndex(t *testing.T, store kv.Store) {
 	})
 }
 
-func testPopulateAndVerify(t *testing.T, store kv.Store) {
+func testPopulateAndVerify(t *testing.T, store kv.SchemaStore) {
 	var (
 		ctx           = context.TODO()
 		resources     = newNResources(20)
-		resourceStore = newSomeResourceStore(ctx, store)
+		resourceStore = newSomeResourceStore(t, ctx, store)
 	)
 
 	// insert 20 resources, but only index the first half
@@ -177,14 +197,9 @@ func testPopulateAndVerify(t *testing.T, store kv.Store) {
 	}
 
 	// populate the missing indexes
-	count, err = resourceStore.ownerIDIndex.Populate(ctx, store)
-	if err != nil {
-		t.Errorf("unexpected err %v", err)
-	}
 
-	// ensure only 10 items were reported as being indexed
-	if count != 10 {
-		t.Errorf("expected to index 20 items, instead indexed %d items", count)
+	if err = kv.NewIndexMigration(mapping).Up(ctx, store); err != nil {
+		t.Errorf("unexpected err %v", err)
 	}
 
 	// check the contents of the index
@@ -260,12 +275,12 @@ func testPopulateAndVerify(t *testing.T, store kv.Store) {
 	}
 }
 
-func testWalk(t *testing.T, store kv.Store) {
+func testWalk(t *testing.T, store kv.SchemaStore) {
 	var (
 		ctx       = context.TODO()
 		resources = newNResources(20)
 		// configure resource store with read disabled
-		resourceStore = newSomeResourceStore(ctx, store)
+		resourceStore = newSomeResourceStore(t, ctx, store)
 
 		cases = []struct {
 			owner     string
@@ -375,4 +390,33 @@ func allKVs(tx kv.Tx, bucket []byte) (kvs [][2][]byte, err error) {
 	}
 
 	return kvs, cursor.Err()
+}
+
+func BenchmarkIndexWalk(b *testing.B, store kv.SchemaStore, resourceCount, fetchCount int) {
+	var (
+		ctx           = context.TODO()
+		resourceStore = newSomeResourceStore(b, ctx, store)
+		userCount     = resourceCount / fetchCount
+		resources     = newNResourcesWithUserCount(resourceCount, userCount)
+	)
+
+	kv.WithIndexReadPathEnabled(resourceStore.ownerIDIndex)
+
+	for _, resource := range resources {
+		resourceStore.Create(ctx, resource, true)
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		store.View(ctx, func(tx kv.Tx) error {
+			return resourceStore.ownerIDIndex.Walk(ctx, tx, []byte(fmt.Sprintf("owner %d", i%userCount)), func(k, v []byte) error {
+				if k == nil || v == nil {
+					b.Fatal("entries must not be nil")
+				}
+
+				return nil
+			})
+		})
+	}
 }

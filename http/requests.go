@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	platform "github.com/influxdata/influxdb"
+	platform "github.com/influxdata/influxdb/v2"
 )
 
 const (
@@ -26,9 +26,7 @@ const (
 // the name.  It interprets the &org= parameter as either the name
 // or the ID.
 func queryOrganization(ctx context.Context, r *http.Request, svc platform.OrganizationService) (o *platform.Organization, err error) {
-
 	filter := platform.OrganizationFilter{}
-
 	if organization := r.URL.Query().Get(Org); organization != "" {
 		if id, err := platform.IDFromString(organization); err == nil {
 			filter.ID = id
@@ -53,8 +51,8 @@ func queryOrganization(ctx context.Context, r *http.Request, svc platform.Organi
 // This will try to find the bucket using an ID string or
 // the name.  It interprets the &bucket= parameter as either the name
 // or the ID.
-func queryBucket(ctx context.Context, r *http.Request, svc platform.BucketService) (b *platform.Bucket, err error) {
-	filter := platform.BucketFilter{}
+func queryBucket(ctx context.Context, orgID platform.ID, r *http.Request, svc platform.BucketService) (b *platform.Bucket, err error) {
+	filter := platform.BucketFilter{OrganizationID: &orgID}
 	if bucket := r.URL.Query().Get(Bucket); bucket != "" {
 		if id, err := platform.IDFromString(bucket); err == nil {
 			filter.ID = id

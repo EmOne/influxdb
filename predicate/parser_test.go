@@ -1,13 +1,12 @@
 package predicate
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/influxdata/influxdb"
-	influxtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	influxtesting "github.com/influxdata/influxdb/v2/testing"
 	"github.com/influxdata/influxql"
 )
 
@@ -68,14 +67,14 @@ func TestParseNode(t *testing.T) {
 			str: ` (t1="v1" and t2="v2") and (`,
 			err: &influxdb.Error{
 				Code: influxdb.EInvalid,
-				Msg:  fmt.Sprintf("extra ( seen"),
+				Msg:  "extra ( seen",
 			},
 		},
 		{
 			str: ` (t1="v1" and t2="v2"))`,
 			err: &influxdb.Error{
 				Code: influxdb.EInvalid,
-				Msg:  fmt.Sprintf("extra ) seen"),
+				Msg:  "extra ) seen",
 			},
 		},
 	}

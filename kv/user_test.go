@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kv"
-	influxdbtesting "github.com/influxdata/influxdb/testing"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kv"
+	influxdbtesting "github.com/influxdata/influxdb/v2/testing"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -27,14 +27,10 @@ func initBoltUserService(f influxdbtesting.UserFields, t *testing.T) (influxdb.U
 	}
 }
 
-func initUserService(s kv.Store, f influxdbtesting.UserFields, t *testing.T) (influxdb.UserService, string, func()) {
+func initUserService(s kv.SchemaStore, f influxdbtesting.UserFields, t *testing.T) (influxdb.UserService, string, func()) {
+	ctx := context.Background()
 	svc := kv.NewService(zaptest.NewLogger(t), s)
 	svc.IDGenerator = f.IDGenerator
-
-	ctx := context.Background()
-	if err := svc.Initialize(ctx); err != nil {
-		t.Fatalf("error initializing user service: %v", err)
-	}
 
 	for _, u := range f.Users {
 		if err := svc.PutUser(ctx, u); err != nil {

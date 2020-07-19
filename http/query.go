@@ -18,12 +18,10 @@ import (
 	"github.com/influxdata/flux/ast"
 	"github.com/influxdata/flux/csv"
 	"github.com/influxdata/flux/lang"
-	"github.com/influxdata/flux/parser"
-	"github.com/influxdata/flux/repl"
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/jsonweb"
-	"github.com/influxdata/influxdb/query"
-	transpiler "github.com/influxdata/influxdb/query/influxql"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/jsonweb"
+	"github.com/influxdata/influxdb/v2/query"
+	transpiler "github.com/influxdata/influxdb/v2/query/influxql"
 	"github.com/influxdata/influxql"
 )
 
@@ -33,10 +31,10 @@ type QueryRequest struct {
 	Query string `json:"query"`
 
 	// Flux fields
-	Extern  *ast.File    `json:"extern,omitempty"`
-	Spec    *flux.Spec   `json:"spec,omitempty"`
-	AST     *ast.Package `json:"ast,omitempty"`
-	Dialect QueryDialect `json:"dialect"`
+	Extern  json.RawMessage `json:"extern,omitempty"`
+	AST     json.RawMessage `json:"ast,omitempty"`
+	Dialect QueryDialect    `json:"dialect"`
+	Now     time.Time       `json:"now"`
 
 	// InfluxQL fields
 	Bucket string `json:"bucket,omitempty"`
@@ -90,17 +88,8 @@ func (r QueryRequest) WithDefaults() QueryRequest {
 
 // Validate checks the query request and returns an error if the request is invalid.
 func (r QueryRequest) Validate() error {
-	// TODO(jsternberg): Remove this, but we are going to not mention
-	// the spec in the error if it is being used.
-	if r.Query == "" && r.Spec == nil && r.AST == nil {
+	if r.Query == "" && r.AST == nil {
 		return errors.New(`request body requires either query or AST`)
-	}
-
-	if r.Spec != nil && r.Extern != nil {
-		return &influxdb.Error{
-			Code: influxdb.EInvalid,
-			Msg:  "request body cannot specify both a spec and external declarations",
-		}
 	}
 
 	if r.Type != "flux" && r.Type != "influxql" {
@@ -155,10 +144,10 @@ type queryParseError struct {
 
 // Analyze attempts to parse the query request and returns any errors
 // encountered in a structured way.
-func (r QueryRequest) Analyze() (*QueryAnalysis, error) {
+func (r QueryRequest) Analyze(l influxdb.FluxLanguageService) (*QueryAnalysis, error) {
 	switch r.Type {
 	case "flux":
-		return r.analyzeFluxQuery()
+		return r.analyzeFluxQuery(l)
 	case "influxql":
 		return r.analyzeInfluxQLQuery()
 	}
@@ -166,9 +155,12 @@ func (r QueryRequest) Analyze() (*QueryAnalysis, error) {
 	return nil, fmt.Errorf("unknown query request type %s", r.Type)
 }
 
-func (r QueryRequest) analyzeFluxQuery() (*QueryAnalysis, error) {
+func (r QueryRequest) analyzeFluxQuery(l influxdb.FluxLanguageService) (*QueryAnalysis, error) {
 	a := &QueryAnalysis{}
-	pkg := parser.ParseSource(r.Query)
+	pkg, err := query.Parse(l, r.Query)
+	if pkg == nil {
+		return nil, err
+	}
 	errCount := ast.Check(pkg)
 	if errCount == 0 {
 		a.Errors = []queryParseError{}
@@ -252,12 +244,17 @@ func (r QueryRequest) proxyRequest(now func() time.Time) (*query.ProxyRequest, e
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
+
+	n := r.Now
+	if n.IsZero() {
+		n = now()
+	}
+
 	// Query is preferred over AST
 	var compiler flux.Compiler
 	if r.Query != "" {
 		switch r.Type {
 		case "influxql":
-			n := now()
 			compiler = &transpiler.Compiler{
 				Now:    &n,
 				Query:  r.Query,
@@ -267,24 +264,18 @@ func (r QueryRequest) proxyRequest(now func() time.Time) (*query.ProxyRequest, e
 			fallthrough
 		default:
 			compiler = lang.FluxCompiler{
-				Now:    now(),
+				Now:    n,
 				Extern: r.Extern,
 				Query:  r.Query,
 			}
 		}
-	} else if r.AST != nil {
+	} else if len(r.AST) > 0 {
 		c := lang.ASTCompiler{
-			AST: r.AST,
-			Now: now(),
-		}
-		if r.Extern != nil {
-			c.PrependFile(r.Extern)
+			Extern: r.Extern,
+			AST:    r.AST,
+			Now:    n,
 		}
 		compiler = c
-	} else if r.Spec != nil {
-		compiler = repl.Compiler{
-			Spec: r.Spec,
-		}
 	}
 
 	delimiter, _ := utf8.DecodeRuneInString(r.Dialect.Delimiter)
@@ -339,12 +330,11 @@ func QueryRequestFromProxyRequest(req *query.ProxyRequest) (*QueryRequest, error
 		qr.Type = "flux"
 		qr.Query = c.Query
 		qr.Extern = c.Extern
-	case repl.Compiler:
-		qr.Type = "flux"
-		qr.Spec = c.Spec
+		qr.Now = c.Now
 	case lang.ASTCompiler:
 		qr.Type = "flux"
 		qr.AST = c.AST
+		qr.Now = c.Now
 	default:
 		return nil, fmt.Errorf("unsupported compiler %T", c)
 	}

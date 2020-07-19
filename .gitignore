@@ -57,6 +57,9 @@ chronograf/dist/dist_gen.go
 chronograf/server/swagger_gen.go
 http/swagger_gen.go
 
+# Ignore TSM testdata binary files
+tsdb/tsi/testdata
+
 # The rest of the file is the .gitignore from the original influxdb repository,
 # copied here to prevent mistakenly checking in any binary files
 # that may be present but previously ignored if you cloned/developed before v2.
@@ -75,27 +78,21 @@ cmd/influxd/version.go
 
 *.test
 
-influx_tsm
 **/influx_tsm
 !**/influx_tsm/
 
-influx_stress
 **/influx_stress
 !**/influx_stress/
 
-influxd
 **/influxd
 !**/influxd/
 
-influx
 **/influx
 !**/influx/
 
-influxdb
 **/influxdb
 !**/influxdb/
 
-influx_inspect
 **/influx_inspect
 !**/influx_inspect/
 
@@ -143,3 +140,16 @@ cypress/videos
 
 # vendored files
 /vendor
+
+# DShell Ignores
+.ash_history
+.bash_history
+.cache/
+.cargo/
+.dockerignore
+.influxdbv2/
+.profile
+.rustup/
+.yarnrc
+go/
+goreleaser-install

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/cmd/influx/config"
-	"github.com/influxdata/influxdb/cmd/influx/internal"
-	"github.com/influxdata/influxdb/http"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/cmd/influx/config"
+	"github.com/influxdata/influxdb/v2/cmd/influx/internal"
+	"github.com/influxdata/influxdb/v2/tenant"
 	"github.com/spf13/cobra"
 	input "github.com/tcnksm/go-input"
 )
@@ -25,7 +25,7 @@ var setupFlags struct {
 	name        string
 	org         string
 	password    string
-	retention   time.Duration
+	retention   string
 	token       string
 	username    string
 }
@@ -35,28 +35,95 @@ func cmdSetup(f *globalFlags, opt genericCLIOpts) *cobra.Command {
 	cmd.RunE = setupF
 	cmd.Short = "Setup instance with initial user, org, bucket"
 
+	f.registerFlags(cmd, "token")
 	cmd.Flags().StringVarP(&setupFlags.username, "username", "u", "", "primary username")
 	cmd.Flags().StringVarP(&setupFlags.password, "password", "p", "", "password for username")
 	cmd.Flags().StringVarP(&setupFlags.token, "token", "t", "", "token for username, else auto-generated")
 	cmd.Flags().StringVarP(&setupFlags.org, "org", "o", "", "primary organization name")
 	cmd.Flags().StringVarP(&setupFlags.bucket, "bucket", "b", "", "primary bucket name")
 	cmd.Flags().StringVarP(&setupFlags.name, "name", "n", "", "config name, only required if you already have existing configs")
-	cmd.Flags().DurationVarP(&setupFlags.retention, "retention", "r", -1, "Duration bucket will retain data. 0 is infinite. Default is 0.")
+	cmd.Flags().StringVarP(&setupFlags.retention, "retention", "r", "", "Duration bucket will retain data. 0 is infinite. Default is 0.")
+	cmd.Flags().BoolVarP(&setupFlags.force, "force", "f", false, "skip confirmation prompt")
+	registerPrintOptions(cmd, &setupFlags.hideHeaders, &setupFlags.json)
+
+	cmd.AddCommand(
+		cmdSetupUser(f, opt),
+	)
+	return cmd
+}
+
+func cmdSetupUser(f *globalFlags, opt genericCLIOpts) *cobra.Command {
+	cmd := opt.newCmd("user", nil, true)
+	cmd.RunE = setupUserF
+	cmd.Short = "Setup instance with user, org, bucket"
+
+	f.registerFlags(cmd, "token")
+	cmd.Flags().StringVarP(&setupFlags.username, "username", "u", "", "primary username")
+	cmd.Flags().StringVarP(&setupFlags.password, "password", "p", "", "password for username")
+	cmd.Flags().StringVarP(&setupFlags.token, "token", "t", "", "token for username, else auto-generated")
+	cmd.Flags().StringVarP(&setupFlags.org, "org", "o", "", "primary organization name")
+	cmd.Flags().StringVarP(&setupFlags.bucket, "bucket", "b", "", "primary bucket name")
+	cmd.Flags().StringVarP(&setupFlags.name, "name", "n", "", "config name, only required if you already have existing configs")
+	cmd.Flags().StringVarP(&setupFlags.retention, "retention", "r", "", "Duration bucket will retain data. 0 is infinite. Default is 0.")
 	cmd.Flags().BoolVarP(&setupFlags.force, "force", "f", false, "skip confirmation prompt")
 	registerPrintOptions(cmd, &setupFlags.hideHeaders, &setupFlags.json)
 
 	return cmd
 }
 
-func setupF(cmd *cobra.Command, args []string) error {
-	if flags.local {
-		return fmt.Errorf("local flag not supported for setup command")
+func setupUserF(cmd *cobra.Command, args []string) error {
+	// check if setup is allowed
+	client, err := newHTTPClient()
+	if err != nil {
+		return err
+	}
+	s := tenant.OnboardClientService{
+		Client: client,
 	}
 
+	req, err := onboardingRequest()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve data to setup instance: %v", err)
+	}
+
+	result, err := s.OnboardUser(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("failed to setup instance: %v", err)
+	}
+
+	w := cmd.OutOrStdout()
+	if setupFlags.json {
+		return writeJSON(w, map[string]interface{}{
+			"user":         result.User.Name,
+			"organization": result.Org.Name,
+			"bucket":       result.Bucket.Name,
+		})
+	}
+
+	tabW := internal.NewTabWriter(w)
+	defer tabW.Flush()
+
+	tabW.HideHeaders(setupFlags.hideHeaders)
+
+	tabW.WriteHeaders("User", "Organization", "Bucket")
+	tabW.Write(map[string]interface{}{
+		"User":         result.User.Name,
+		"Organization": result.Org.Name,
+		"Bucket":       result.Bucket.Name,
+	})
+
+	return nil
+}
+
+func setupF(cmd *cobra.Command, args []string) error {
 	// check if setup is allowed
-	s := &http.SetupService{
-		Addr:               flags.Host,
-		InsecureSkipVerify: flags.skipVerify,
+	client, err := newHTTPClient()
+	if err != nil {
+		return err
+	}
+
+	s := tenant.OnboardClientService{
+		Client: client,
 	}
 	allowed, err := s.IsOnboarding(context.Background())
 	if err != nil {
@@ -71,12 +138,11 @@ func setupF(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	localSVC := config.NewLocalConfigSVC(dPath, dir)
+
 	existingConfigs := make(config.Configs)
 	if _, err := os.Stat(dPath); err == nil {
-		existingConfigs, _ = config.LocalConfigsSVC{
-			Path: dPath,
-			Dir:  dir,
-		}.ParseConfigs()
+		existingConfigs, _ = localSVC.ListConfigs()
 		// ignore the error if found nothing
 		if setupFlags.name == "" {
 			return errors.New("flag name is required if you already have existing configs")
@@ -99,29 +165,21 @@ func setupF(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to setup instance: %v", err)
 	}
 
-	var configName string
-	var p *config.Config
-	if len(existingConfigs) > 0 {
-		configName = setupFlags.name
-		p = &config.Config{
-			Host: flags.Host,
-		}
-	} else {
-		configName = "default"
-		p = &config.DefaultConfig
-	}
+	p := config.DefaultConfig
 	p.Token = result.Auth.Token
 	p.Org = result.Org.Name
-	existingConfigs[configName] = *p
-	localSVC := config.LocalConfigsSVC{
-		Path: dPath,
-		Dir:  dir,
+	if len(existingConfigs) > 0 {
+		p.Name = setupFlags.name
 	}
-	if err = localSVC.WriteConfigs(existingConfigs); err != nil {
+	if flags.Host != "" {
+		p.Host = flags.Host
+	}
+
+	if _, err = localSVC.CreateConfig(p); err != nil {
 		return fmt.Errorf("failed to write config to path %q: %v", dPath, err)
 	}
 
-	fmt.Println(string(promptWithColor(fmt.Sprintf("Config %s has been stored in %s.", configName, dPath), colorCyan)))
+	fmt.Println(string(promptWithColor(fmt.Sprintf("Config %s has been stored in %s.", p.Name, dPath), colorCyan)))
 
 	w := cmd.OutOrStdout()
 	if setupFlags.json {
@@ -164,18 +222,20 @@ func onboardingRequest() (*influxdb.OnboardingRequest, error) {
 
 func nonInteractive() (*influxdb.OnboardingRequest, error) {
 	req := &influxdb.OnboardingRequest{
-		User:     setupFlags.username,
-		Password: setupFlags.password,
-		Token:    setupFlags.token,
-		Org:      setupFlags.org,
-		Bucket:   setupFlags.bucket,
-		// TODO: this manipulation is required by the API, something that
-		// 	we should fixup to be a duration instead
-		RetentionPeriod: uint(setupFlags.retention / time.Hour),
+		User:            setupFlags.username,
+		Password:        setupFlags.password,
+		Token:           setupFlags.token,
+		Org:             setupFlags.org,
+		Bucket:          setupFlags.bucket,
+		RetentionPeriod: influxdb.InfiniteRetention,
 	}
 
-	if setupFlags.retention < 0 {
-		req.RetentionPeriod = influxdb.InfiniteRetention
+	dur, err := rawDurationToTimeDuration(setupFlags.retention)
+	if err != nil {
+		return nil, err
+	}
+	if dur > 0 {
+		req.RetentionPeriod = uint(dur / time.Hour)
 	}
 	return req, nil
 }
@@ -211,8 +271,14 @@ func interactive() (req *influxdb.OnboardingRequest, err error) {
 	} else {
 		req.Bucket = getInput(ui, "Please type your primary bucket name", "")
 	}
-	if setupFlags.retention >= 0 {
-		req.RetentionPeriod = uint(setupFlags.retention)
+
+	dur, err := rawDurationToTimeDuration(setupFlags.retention)
+	if err != nil {
+		return nil, err
+	}
+
+	if dur > 0 {
+		req.RetentionPeriod = uint(dur / time.Hour)
 	} else {
 		for {
 			rpStr := getInput(ui, "Please type your retention period in hours.\r\nOr press ENTER for infinite.", strconv.Itoa(influxdb.InfiniteRetention))
@@ -252,7 +318,7 @@ func getConfirm(ui *input.UI, or *influxdb.OnboardingRequest) bool {
 	for {
 		rp := "infinite"
 		if or.RetentionPeriod > 0 {
-			rp = fmt.Sprintf("%d hrs", or.RetentionPeriod)
+			rp = fmt.Sprintf("%d hrs", time.Duration(or.RetentionPeriod)/time.Hour)
 		}
 		ui.Writer.Write(promptWithColor(fmt.Sprintf(`
 You have entered:

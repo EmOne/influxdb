@@ -9,13 +9,12 @@ import (
 	"path"
 	"time"
 
-	"github.com/influxdata/influxdb/kit/tracing"
-
 	"github.com/influxdata/httprouter"
-	"github.com/influxdata/influxdb"
-	pctx "github.com/influxdata/influxdb/context"
-	"github.com/influxdata/influxdb/notification/check"
-	"github.com/influxdata/influxdb/pkg/httpc"
+	"github.com/influxdata/influxdb/v2"
+	pctx "github.com/influxdata/influxdb/v2/context"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/notification/check"
+	"github.com/influxdata/influxdb/v2/pkg/httpc"
 	"go.uber.org/zap"
 )
 
@@ -25,26 +24,29 @@ type CheckBackend struct {
 	influxdb.HTTPErrorHandler
 	log *zap.Logger
 
+	AlgoWProxy                 FeatureProxyHandler
 	TaskService                influxdb.TaskService
 	CheckService               influxdb.CheckService
 	UserResourceMappingService influxdb.UserResourceMappingService
 	LabelService               influxdb.LabelService
 	UserService                influxdb.UserService
 	OrganizationService        influxdb.OrganizationService
+	FluxLanguageService        influxdb.FluxLanguageService
 }
 
 // NewCheckBackend returns a new instance of CheckBackend.
 func NewCheckBackend(log *zap.Logger, b *APIBackend) *CheckBackend {
 	return &CheckBackend{
-		HTTPErrorHandler: b.HTTPErrorHandler,
-		log:              log,
-
+		HTTPErrorHandler:           b.HTTPErrorHandler,
+		log:                        log,
+		AlgoWProxy:                 b.AlgoWProxy,
 		TaskService:                b.TaskService,
 		CheckService:               b.CheckService,
 		UserResourceMappingService: b.UserResourceMappingService,
 		LabelService:               b.LabelService,
 		UserService:                b.UserService,
 		OrganizationService:        b.OrganizationService,
+		FluxLanguageService:        b.FluxLanguageService,
 	}
 }
 
@@ -60,6 +62,7 @@ type CheckHandler struct {
 	LabelService               influxdb.LabelService
 	UserService                influxdb.UserService
 	OrganizationService        influxdb.OrganizationService
+	FluxLanguageService        influxdb.FluxLanguageService
 }
 
 const (
@@ -87,14 +90,16 @@ func NewCheckHandler(log *zap.Logger, b *CheckBackend) *CheckHandler {
 		UserService:                b.UserService,
 		TaskService:                b.TaskService,
 		OrganizationService:        b.OrganizationService,
+		FluxLanguageService:        b.FluxLanguageService,
 	}
-	h.HandlerFunc("POST", prefixChecks, h.handlePostCheck)
+
+	h.Handler("POST", prefixChecks, withFeatureProxy(b.AlgoWProxy, http.HandlerFunc(h.handlePostCheck)))
 	h.HandlerFunc("GET", prefixChecks, h.handleGetChecks)
 	h.HandlerFunc("GET", checksIDPath, h.handleGetCheck)
 	h.HandlerFunc("GET", checksIDQueryPath, h.handleGetCheckQuery)
 	h.HandlerFunc("DELETE", checksIDPath, h.handleDeleteCheck)
-	h.HandlerFunc("PUT", checksIDPath, h.handlePutCheck)
-	h.HandlerFunc("PATCH", checksIDPath, h.handlePatchCheck)
+	h.Handler("PUT", checksIDPath, withFeatureProxy(b.AlgoWProxy, http.HandlerFunc(h.handlePutCheck)))
+	h.Handler("PATCH", checksIDPath, withFeatureProxy(b.AlgoWProxy, http.HandlerFunc(h.handlePatchCheck)))
 
 	memberBackend := MemberBackend{
 		HTTPErrorHandler:           b.HTTPErrorHandler,
@@ -234,7 +239,7 @@ func (h *CheckHandler) newCheckResponse(ctx context.Context, chk influxdb.Check,
 func (h *CheckHandler) newChecksResponse(ctx context.Context, chks []influxdb.Check, labelService influxdb.LabelService, f influxdb.PagingFilter, opts influxdb.FindOptions) *checksResponse {
 	resp := &checksResponse{
 		Checks: []*checkResponse{},
-		Links:  newPagingLinks(prefixChecks, opts, f, len(chks)),
+		Links:  influxdb.NewPagingLinks(prefixChecks, opts, f, len(chks)),
 	}
 	for _, chk := range chks {
 		labels, _ := labelService.FindResourceLabels(ctx, influxdb.LabelMappingFilter{ResourceID: chk.GetID(), ResourceType: influxdb.ChecksResourceType})
@@ -298,7 +303,7 @@ func (h *CheckHandler) handleGetCheckQuery(w http.ResponseWriter, r *http.Reques
 		h.HandleHTTPError(ctx, err, w)
 		return
 	}
-	flux, err := chk.GenerateFlux()
+	flux, err := chk.GenerateFlux(h.FluxLanguageService)
 	if err != nil {
 		h.HandleHTTPError(ctx, err, w)
 		return
@@ -364,7 +369,7 @@ func decodeCheckFilter(ctx context.Context, r *http.Request) (*influxdb.CheckFil
 		},
 	}
 
-	opts, err := decodeFindOptions(r)
+	opts, err := influxdb.DecodeFindOptions(r)
 	if err != nil {
 		return f, nil, err
 	}
@@ -433,7 +438,7 @@ func decodePostCheckRequest(r *http.Request) (postCheckRequest, error) {
 	}, nil
 }
 
-func decodePutCheckRequest(ctx context.Context, r *http.Request) (influxdb.CheckCreate, error) {
+func decodePutCheckRequest(ctx context.Context, lang influxdb.FluxLanguageService, r *http.Request) (influxdb.CheckCreate, error) {
 	params := httprouter.ParamsFromContext(ctx)
 	id := params.ByName("id")
 	if id == "" {
@@ -471,7 +476,7 @@ func decodePutCheckRequest(ctx context.Context, r *http.Request) (influxdb.Check
 	}
 	chk.SetID(*i)
 
-	if err := chk.Valid(); err != nil {
+	if err := chk.Valid(lang); err != nil {
 		return influxdb.CheckCreate{}, err
 	}
 
@@ -600,7 +605,7 @@ func (h *CheckHandler) mapNewCheckLabels(ctx context.Context, chk influxdb.Check
 // handlePutCheck is the HTTP handler for the PUT /api/v2/checks route.
 func (h *CheckHandler) handlePutCheck(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	chk, err := decodePutCheckRequest(ctx, r)
+	chk, err := decodePutCheckRequest(ctx, h.FluxLanguageService, r)
 	if err != nil {
 		h.log.Debug("Failed to decode request", zap.Error(err))
 		h.HandleHTTPError(ctx, err, w)
@@ -745,7 +750,7 @@ func (s *CheckService) FindChecks(ctx context.Context, filter influxdb.CheckFilt
 	span, _ := tracing.StartSpanFromContext(ctx)
 	defer span.Finish()
 
-	params := findOptionParams(opt...)
+	params := influxdb.FindOptionParams(opt...)
 	if filter.OrgID != nil {
 		params = append(params, [2]string{"orgID", filter.OrgID.String()})
 	}
@@ -813,7 +818,7 @@ func (s *CheckService) PatchCheck(ctx context.Context, id influxdb.ID, u influxd
 
 	var r Check
 	err := s.Client.
-		PutJSON(u, checkIDPath(id)).
+		PatchJSON(u, checkIDPath(id)).
 		DecodeJSON(&r).
 		Do(ctx)
 	if err != nil {

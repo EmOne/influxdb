@@ -1,6 +1,6 @@
 import React, {PureComponent, ChangeEvent} from 'react'
 import _ from 'lodash'
-import {connect} from 'react-redux'
+import {connect, ConnectedProps} from 'react-redux'
 
 // Component
 import {
@@ -32,11 +32,8 @@ interface OwnProps {
   selected?: string[]
 }
 
-interface DispatchProps {
-  notify: typeof notifyAction
-}
-
-type Props = DispatchProps & OwnProps
+type ReduxProps = ConnectedProps<typeof connector>
+type Props = ReduxProps & OwnProps
 
 interface State {
   templateValuesString: string
@@ -54,7 +51,7 @@ class MapVariableBuilder extends PureComponent<Props, State> {
     const {entries} = this
 
     return (
-      <Form.Element label="Comma Separated Values">
+      <Form.Element label="Comma Separated Key-Value Pairs Per Line">
         <Grid.Row>
           <Grid.Column>
             <TextArea
@@ -67,7 +64,7 @@ class MapVariableBuilder extends PureComponent<Props, State> {
         <Grid.Row>
           <Grid.Column widthXS={Columns.Six}>
             <p>
-              Mapping Contains <strong>{entries.length}</strong> key-value pair
+              Mapping contains <strong>{entries.length}</strong> key-value pair
               {pluralize(entries)}
             </p>
           </Grid.Column>
@@ -75,7 +72,11 @@ class MapVariableBuilder extends PureComponent<Props, State> {
             <Form.Element label="Select A Default">
               <Dropdown
                 button={(active, onClick) => (
-                  <Dropdown.Button active={active} onClick={onClick}>
+                  <Dropdown.Button
+                    active={active}
+                    onClick={onClick}
+                    testID="map-variable-dropdown--button"
+                  >
                     {this.defaultID}
                   </Dropdown.Button>
                 )}
@@ -150,11 +151,10 @@ class MapVariableBuilder extends PureComponent<Props, State> {
   }
 }
 
-const mdtp: DispatchProps = {
+const mdtp = {
   notify: notifyAction,
 }
 
-export default connect<{}, DispatchProps, OwnProps>(
-  null,
-  mdtp
-)(MapVariableBuilder)
+const connector = connect(null, mdtp)
+
+export default connector(MapVariableBuilder)

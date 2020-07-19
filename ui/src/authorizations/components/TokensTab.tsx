@@ -1,15 +1,17 @@
 // Libraries
 import React, {PureComponent} from 'react'
 import {connect} from 'react-redux'
-import {withRouter, WithRouterProps} from 'react-router'
+import {withRouter, RouteComponentProps} from 'react-router-dom'
+import {isEmpty} from 'lodash'
 
 // Components
-import {Sort} from '@influxdata/clockface'
+import {Sort, ComponentSize, EmptyState} from '@influxdata/clockface'
 import SearchWidget from 'src/shared/components/search_widget/SearchWidget'
 import TokenList from 'src/authorizations/components/TokenList'
 import FilterList from 'src/shared/components/FilterList'
 import TabbedPageHeader from 'src/shared/components/tabbed_page/TabbedPageHeader'
 import GenerateTokenDropdown from 'src/authorizations/components/GenerateTokenDropdown'
+import ResourceSortDropdown from 'src/shared/components/resource_sort_dropdown/ResourceSortDropdown'
 
 // Types
 import {AppState, Authorization, ResourceType} from 'src/types'
@@ -21,6 +23,7 @@ import {getAll} from 'src/resources/selectors'
 enum AuthSearchKeys {
   Description = 'description',
   Status = 'status',
+  CreatedAt = 'createdAt',
 }
 
 interface State {
@@ -36,7 +39,7 @@ interface StateProps {
 
 type SortKey = keyof Authorization
 
-type Props = StateProps & WithRouterProps
+type Props = StateProps & RouteComponentProps<{orgID: string}>
 
 const FilterAuthorizations = FilterList<Authorization>()
 
@@ -55,20 +58,33 @@ class TokensTab extends PureComponent<Props, State> {
     const {searchTerm, sortKey, sortDirection, sortType} = this.state
     const {tokens} = this.props
 
+    const leftHeaderItems = (
+      <>
+        <SearchWidget
+          searchTerm={searchTerm}
+          placeholderText="Filter Tokens..."
+          onSearch={this.handleChangeSearchTerm}
+          testID="input-field--filter"
+        />
+        <ResourceSortDropdown
+          resourceType={ResourceType.Authorizations}
+          sortDirection={sortDirection}
+          sortKey={sortKey}
+          sortType={sortType}
+          onSelect={this.handleSort}
+          width={238}
+        />
+      </>
+    )
+
+    const rightHeaderItems = <GenerateTokenDropdown />
+
     return (
       <>
-        <TabbedPageHeader>
-          <SearchWidget
-            searchTerm={searchTerm}
-            placeholderText="Filter Tokens..."
-            onSearch={this.handleChangeSearchTerm}
-            testID="input-field--filter"
-          />
-          <GenerateTokenDropdown
-            onSelectAllAccess={this.handleGenerateAllAccess}
-            onSelectReadWrite={this.handleGenerateReadWrite}
-          />
-        </TabbedPageHeader>
+        <TabbedPageHeader
+          childrenLeft={leftHeaderItems}
+          childrenRight={rightHeaderItems}
+        />
         <FilterAuthorizations
           list={tokens}
           searchTerm={searchTerm}
@@ -77,6 +93,7 @@ class TokensTab extends PureComponent<Props, State> {
           {filteredAuths => (
             <TokenList
               auths={filteredAuths}
+              emptyState={this.emptyState}
               searchTerm={searchTerm}
               sortKey={sortKey}
               sortDirection={sortDirection}
@@ -89,6 +106,14 @@ class TokensTab extends PureComponent<Props, State> {
     )
   }
 
+  private handleSort = (
+    sortKey: SortKey,
+    sortDirection: Sort,
+    sortType: SortTypes
+  ): void => {
+    this.setState({sortKey, sortDirection, sortType})
+  }
+
   private handleClickColumn = (nextSort: Sort, sortKey: SortKey) => {
     const sortType = SortTypes.String
     this.setState({sortKey, sortDirection: nextSort, sortType})
@@ -99,25 +124,32 @@ class TokensTab extends PureComponent<Props, State> {
   }
 
   private get searchKeys(): AuthSearchKeys[] {
-    return [AuthSearchKeys.Status, AuthSearchKeys.Description]
+    return [
+      AuthSearchKeys.Status,
+      AuthSearchKeys.Description,
+      AuthSearchKeys.CreatedAt,
+    ]
   }
 
-  private handleGenerateAllAccess = () => {
-    const {
-      router,
-      params: {orgID},
-    } = this.props
+  private get emptyState(): JSX.Element {
+    const {searchTerm} = this.state
 
-    router.push(`/orgs/${orgID}/load-data/tokens/generate/all-access`)
-  }
+    if (isEmpty(searchTerm)) {
+      return (
+        <EmptyState size={ComponentSize.Large}>
+          <EmptyState.Text>
+            Looks like there aren't any <b>Tokens</b>, why not generate one?
+          </EmptyState.Text>
+          <GenerateTokenDropdown />
+        </EmptyState>
+      )
+    }
 
-  private handleGenerateReadWrite = () => {
-    const {
-      router,
-      params: {orgID},
-    } = this.props
-
-    router.push(`/orgs/${orgID}/load-data/tokens/generate/buckets`)
+    return (
+      <EmptyState size={ComponentSize.Large}>
+        <EmptyState.Text>No Tokens match your query</EmptyState.Text>
+      </EmptyState>
+    )
   }
 }
 
@@ -125,7 +157,4 @@ const mstp = (state: AppState) => ({
   tokens: getAll<Authorization>(state, ResourceType.Authorizations),
 })
 
-export default connect<StateProps, {}, {}>(
-  mstp,
-  null
-)(withRouter(TokensTab))
+export default connect<StateProps>(mstp)(withRouter(TokensTab))

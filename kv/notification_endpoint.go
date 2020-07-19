@@ -3,9 +3,9 @@ package kv
 import (
 	"context"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/tracing"
-	"github.com/influxdata/influxdb/notification/endpoint"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/tracing"
+	"github.com/influxdata/influxdb/v2/notification/endpoint"
 )
 
 var (
@@ -14,6 +14,9 @@ var (
 		Msg:  "notification endpoint not found",
 		Code: influxdb.ENotFound,
 	}
+
+	notificationEndpointBucket      = []byte("notificationEndpointv1")
+	notificationEndpointIndexBucket = []byte("notificationEndpointIndexv1")
 )
 
 var _ influxdb.NotificationEndpointService = (*Service)(nil)
@@ -40,8 +43,8 @@ func newEndpointStore() *IndexStore {
 
 	return &IndexStore{
 		Resource:   resource,
-		EntStore:   NewStoreBase(resource, []byte("notificationEndpointv1"), EncIDKey, EncBodyJSON, decEndpointEntFn, decValToEntFn),
-		IndexStore: NewOrgNameKeyStore(resource, []byte("notificationEndpointIndexv1"), false),
+		EntStore:   NewStoreBase(resource, notificationEndpointBucket, EncIDKey, EncBodyJSON, decEndpointEntFn, decValToEntFn),
+		IndexStore: NewOrgNameKeyStore(resource, notificationEndpointIndexBucket, true),
 	}
 }
 

@@ -117,9 +117,29 @@ func (e *entry) size() int {
 	return sz
 }
 
+// AppendTimestamps appends ts with the timestamps from the entry.
+func (e *entry) AppendTimestamps(ts []int64) []int64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	n := e.values.Len()
+	if n > 0 {
+		for i := range e.values {
+			ts = append(ts, e.values[i].UnixNano())
+		}
+	}
+	return ts
+}
+
 // InfluxQLType returns for the entry the data type of its values.
 func (e *entry) InfluxQLType() (influxql.DataType, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.values.InfluxQLType()
+}
+
+// BlockType returns the data type for the entry as a block type.
+func (e *entry) BlockType() byte {
+	// This value is mutated on create and does not need to be
+	// protected by a mutex.
+	return valueTypeToBlockType(e.vtype)
 }

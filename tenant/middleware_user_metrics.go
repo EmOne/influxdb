@@ -3,9 +3,9 @@ package tenant
 import (
 	"context"
 
-	"github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/kit/metric"
-	"github.com/influxdata/influxdb/kit/prom"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/kit/metric"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var _ influxdb.UserService = (*UserMetrics)(nil)
@@ -19,10 +19,10 @@ type UserMetrics struct {
 }
 
 // NewUserMetrics returns a metrics service middleware for the User Service.
-func NewUserMetrics(reg *prom.Registry, s influxdb.UserService, opts ...MetricsOption) *UserMetrics {
-	o := applyOpts(opts...)
+func NewUserMetrics(reg prometheus.Registerer, s influxdb.UserService, opts ...metric.ClientOptFn) *UserMetrics {
+	o := metric.ApplyMetricOpts(opts...)
 	return &UserMetrics{
-		rec:         metric.New(reg, o.applySuffix("user")),
+		rec:         metric.New(reg, o.ApplySuffix("user")),
 		userService: s,
 	}
 }
@@ -63,6 +63,12 @@ func (m *UserMetrics) DeleteUser(ctx context.Context, id influxdb.ID) error {
 	return rec(err)
 }
 
+func (m *UserMetrics) FindPermissionForUser(ctx context.Context, id influxdb.ID) (influxdb.PermissionSet, error) {
+	rec := m.rec.Record("find_permission_for_user")
+	ps, err := m.userService.FindPermissionForUser(ctx, id)
+	return ps, rec(err)
+}
+
 type PasswordMetrics struct {
 	// RED metrics
 	rec *metric.REDClient
@@ -71,10 +77,10 @@ type PasswordMetrics struct {
 }
 
 // NewPasswordMetrics returns a metrics service middleware for the Password Service.
-func NewPasswordMetrics(reg *prom.Registry, s influxdb.PasswordsService, opts ...MetricsOption) *PasswordMetrics {
-	o := applyOpts(opts...)
+func NewPasswordMetrics(reg prometheus.Registerer, s influxdb.PasswordsService, opts ...metric.ClientOptFn) *PasswordMetrics {
+	o := metric.ApplyMetricOpts(opts...)
 	return &PasswordMetrics{
-		rec:        metric.New(reg, o.applySuffix("password")),
+		rec:        metric.New(reg, o.ApplySuffix("password")),
 		pwdService: s,
 	}
 }

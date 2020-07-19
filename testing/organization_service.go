@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/influxdata/influxdb"
-	platform "github.com/influxdata/influxdb"
-	"github.com/influxdata/influxdb/mock"
+	"github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/mock"
 )
 
 const (
@@ -86,6 +85,8 @@ func OrganizationService(
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt := tt
+			t.Parallel()
 			tt.fn(init, t)
 		})
 	}
@@ -129,7 +130,7 @@ func CreateOrganization(
 				organizations: []*influxdb.Organization{
 					{
 						Name:        "name1",
-						ID:          platform.ID(mock.FirstMockID),
+						ID:          influxdb.ID(mock.FirstMockID),
 						Description: "desc1",
 						CRUDLog: influxdb.CRUDLog{
 							CreatedAt: time.Date(2006, 5, 4, 1, 2, 3, 0, time.UTC),
@@ -165,7 +166,7 @@ func CreateOrganization(
 						Name: "organization1",
 					},
 					{
-						ID:   platform.ID(mock.FirstMockID),
+						ID:   influxdb.ID(mock.FirstMockID),
 						Name: "organization2",
 						CRUDLog: influxdb.CRUDLog{
 							CreatedAt: time.Date(2006, 5, 4, 1, 2, 3, 0, time.UTC),
@@ -290,7 +291,7 @@ func CreateOrganization(
 						Name: "organization1",
 					},
 					{
-						ID:   platform.ID(mock.FirstMockID),
+						ID:   influxdb.ID(mock.FirstMockID),
 						Name: "organization2",
 						CRUDLog: influxdb.CRUDLog{
 							CreatedAt: time.Date(2006, 5, 4, 1, 2, 3, 0, time.UTC),
@@ -895,6 +896,34 @@ func UpdateOrganization(
 			},
 		},
 		{
+			name: "update name to same name",
+			fields: OrganizationFields{
+				TimeGenerator: mock.TimeGenerator{FakeValue: time.Date(2006, 5, 4, 1, 2, 3, 0, time.UTC)},
+				Organizations: []*influxdb.Organization{
+					{
+						ID:   MustIDBase16(orgOneID),
+						Name: "organization1",
+					},
+					{
+						ID:   MustIDBase16(orgTwoID),
+						Name: "organization2",
+					},
+				},
+			},
+			args: args{
+				id:   MustIDBase16(orgOneID),
+				name: strPtr("organization1"),
+			},
+			wants: wants{
+				organization: &influxdb.Organization{
+					ID:   MustIDBase16(orgOneID),
+					Name: "organization1",
+					CRUDLog: influxdb.CRUDLog{
+						UpdatedAt: time.Date(2006, 5, 4, 1, 2, 3, 0, time.UTC),
+					},
+				},
+			},
+		}, {
 			name: "update name not unique",
 			fields: OrganizationFields{
 				TimeGenerator: mock.TimeGenerator{FakeValue: time.Date(2006, 5, 4, 1, 2, 3, 0, time.UTC)},

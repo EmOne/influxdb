@@ -3,7 +3,7 @@ package authorizer
 import (
 	"context"
 
-	"github.com/influxdata/influxdb"
+	"github.com/influxdata/influxdb/v2"
 )
 
 var _ influxdb.UserService = (*UserService)(nil)
@@ -74,4 +74,11 @@ func (s *UserService) DeleteUser(ctx context.Context, id influxdb.ID) error {
 		return err
 	}
 	return s.s.DeleteUser(ctx, id)
+}
+
+func (s *UserService) FindPermissionForUser(ctx context.Context, uid influxdb.ID) (influxdb.PermissionSet, error) {
+	return nil, &influxdb.Error{
+		Code: influxdb.EInternal,
+		Msg:  "not implemented",
+	}
 }
